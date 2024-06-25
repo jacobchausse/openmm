@@ -1,0 +1,21 @@
+name: build
+channels:
+- conda-forge
+- defaults
+dependencies:
+# build
+- jom
+- cmake
+- ccache
+- m2-coreutils
+# host
+- python
+- cython
+- swig
+- numpy
+- doxygen 1.8.14
+- khronos-opencl-icd-loader
+# test
+- pytest
+- pytest-xdist
+- pytest-timeout
