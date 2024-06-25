@@ -75,8 +75,9 @@ public:
      * @param temperature    the temperature of the heat bath (in Kelvin)
      * @param frictionCoeff  the friction coefficient which couples the system to the heat bath (in inverse picoseconds)
      * @param stepSize       the step size with which to integrator the system (in picoseconds)
+     * @param openPath       if true, will use the open path theory of LePIGS.
      */
-    RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize);
+    RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, bool openPath=false);
     /**
      * Create a RPMDIntegrator.
      *
@@ -88,8 +89,9 @@ public:
      *                       map is the index of a force group, and the corresponding value is the number of copies to evaluate
      *                       that force group on.  If no entry is provided for a force group (the default), it is evaluated
      *                       independently on every copy.
+     * @param openPath       if true, will use the open path theory of LePIGS.
      */
-    RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, const std::map<int, int>& contractions);
+    RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, const std::map<int, int>& contractions, bool openPath=false);
     /**
      * Get the number of copies of the system being simulated.
      */
@@ -141,6 +143,12 @@ public:
      */
     void setApplyThermostat(bool apply) {
         applyThermostat = apply;
+    }
+    /**
+     * Get whether to use an open path, for the LePIGS method.
+     */
+    bool getUseOpenPath() const {
+        return useOpenPath;
     }
     /**
      * Get the random number seed.  See setRandomNumberSeed() for details.
@@ -205,6 +213,36 @@ public:
      */
     double getTotalEnergy();
     /**
+     * Get the kinetic energy using the primitive estimator
+     */
+    double getKineticEnergyPrimitiveEstimator();
+    /**
+     * Get the kinetic energy using the virial estimator
+     */
+    double getKineticEnergyVirialEstimator();
+    /**
+     * Get the kinetic energy using the centroid virial estimator
+     */
+    double getKineticEnergyCentroidVirialEstimator();
+    /**
+     * Get the potential energy
+     */
+    double getPotentialEnergy();
+    /**
+     * Get the total energy using PIMD estimators.
+     *
+     * @param estimator   to select the estimator. '0' is the primitive estimator, '1' is the virial estimator and '2' 
+     * is the centroid virial estimator. If 'useOpenPath' is true (LePIGS), this is ignored.
+     */
+    double getTotalEnergyPIMD(int estimator=0);
+    /**
+     * Get the system's kinetic temperature.
+     * 
+     * @param subtractDOF number of degrees of freedom to subtract when calculating the temperature.
+     * For example, if the COM motion is removed, subtract 3 DOF.
+     */    
+    double getKineticTemperature(int subtractDOF=0);
+    /**
      * Advance a simulation through time by taking a series of time steps.
      *
      * @param steps   the number of time steps to take
@@ -237,7 +275,8 @@ protected:
 private:
     double temperature, friction;
     int numCopies, randomNumberSeed;
-    bool applyThermostat;
+    unsigned int nthreadsfft;
+    bool applyThermostat, useOpenPath;
     std::map<int, int> contractions;
     bool forcesAreValid, hasSetPosition, hasSetVelocity, isFirstStep;
     Kernel kernel;
