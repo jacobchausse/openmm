@@ -128,8 +128,7 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
     const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
     const double scale = 1.0/sqrt((double) numCopies);
     const double nkT = numCopies*BOLTZ*integrator.getTemperature();
-    const double nkTm1 = (numCopies-1)*BOLTZ*integrator.getTemperature();
-    const double twown = 2.0*nkTm1/hbar;
+    const double twown = 2.0*nkT/hbar;
     const double c1_0 = exp(-halfdt*integrator.getFriction());
     const double c2_0 = sqrt(1.0-c1_0*c1_0);
     
