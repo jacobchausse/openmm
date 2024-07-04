@@ -281,7 +281,8 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
     vector<double> q(numCopies);
     const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
     const double nkT = (numCopies)*BOLTZ*integrator.getTemperature();
-    const double twown = 2.0*nkT/hbar;
+    const double nkTm1 = (numCopies-1)*BOLTZ*integrator.getTemperature();
+    const double twown = 2.0*nkTm1/hbar;
     const double c1_0 = exp(-halfdt*integrator.getFriction());
     const double c2_0 = sqrt(1.0-c1_0*c1_0);
     double norm = sqrt(2. * numCopies);
@@ -326,9 +327,6 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
     for (int i = 0; i < numCopies; i++)
         for (int j = 0; j < numParticles; j++)
             if (system.getParticleMass(j) != 0.0) {
-                //if (i==0 || i==(numCopies-1)) // half V at end beads
-                //    velocities[i][j] += .5*forces[i][j]*(halfdt/system.getParticleMass(j));
-                //else
                 velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
             }
     // Evolve the free ring polymer by transforming to the frequency domain.
@@ -374,9 +372,6 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
     for (int i = 0; i < numCopies; i++)
         for (int j = 0; j < numParticles; j++)
             if (system.getParticleMass(j) != 0.0) {
-                //if (i==0 || i==(numCopies-1)) // half V at end beads
-                //    velocities[i][j] += .5*forces[i][j]*(halfdt/system.getParticleMass(j));
-                //else
                 velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
             }
     // Apply the PILE-L thermostat again.
