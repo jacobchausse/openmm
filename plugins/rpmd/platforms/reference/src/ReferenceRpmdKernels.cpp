@@ -280,7 +280,7 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
     vector<double> v(numCopies);
     vector<double> q(numCopies);
     const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
-    const double nkT = (numCopies)*BOLTZ*integrator.getTemperature();
+    //const double nkT = (numCopies)*BOLTZ*integrator.getTemperature();
     const double nkTm1 = (numCopies-1)*BOLTZ*integrator.getTemperature();
     const double twown = 2.0*nkTm1/hbar;
     const double c1_0 = exp(-halfdt*integrator.getFriction());
@@ -293,7 +293,7 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
         for (int particle = 0; particle < numParticles; particle++) {
             if (system.getParticleMass(particle) == 0.0)
                 continue;
-            const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
+            const double c3_0 = c2_0*sqrt(nkTm1/system.getParticleMass(particle));
             for (int component = 0; component < 3; component++) {
                 for (int k = 0; k < numCopies; k++) {
                     v[k] = (velocities[k][particle][component]);
@@ -309,7 +309,7 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
                     const double wk = twown*sin(k*M_PI/numCopies/2.);
                     const double c1 = exp(-2.0*wk*halfdt);
                     const double c2 = sqrt((1.0-c1*c1)); ///2);
-                    const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
+                    const double c3 = c2*sqrt(nkTm1/system.getParticleMass(particle));
                     double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
                     v[k] = v[k]*c1 + rand1;
                 }
@@ -380,7 +380,7 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
         for (int particle = 0; particle < numParticles; particle++) {
             if (system.getParticleMass(particle) == 0.0)
                 continue;
-            const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
+            const double c3_0 = c2_0*sqrt(nkTm1/system.getParticleMass(particle));
             for (int component = 0; component < 3; component++) {
                 for (int k = 0; k < numCopies; k++)
                     v[k] = (velocities[k][particle][component]);
@@ -396,7 +396,7 @@ void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, con
                     const double wk = twown*sin(k*M_PI/numCopies/2.);
                     const double c1 = exp(-2.0*wk*halfdt);
                     const double c2 = sqrt((1.0-c1*c1)); ///2);
-                    const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
+                    const double c3 = c2*sqrt(nkTm1/system.getParticleMass(particle));
                     double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
                     v[k] = v[k]*c1 + rand1;
                 }
