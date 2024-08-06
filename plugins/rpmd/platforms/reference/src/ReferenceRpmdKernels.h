@@ -83,7 +83,10 @@ public:
      */
     void copyToContext(int copy, ContextImpl& context);
 private:
-    void computeForces(ContextImpl& context, const RPMDIntegrator& integrator);
+    void executeClosedPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid);
+    void executeOpenPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid);
+    void computeForcesClosedPath(ContextImpl& context, const RPMDIntegrator& integrator);
+    void computeForcesOpenPath(ContextImpl& context, const RPMDIntegrator& integrator);
     std::vector<std::vector<Vec3> > positions;
     std::vector<std::vector<Vec3> > velocities;
     std::vector<std::vector<Vec3> > forces;

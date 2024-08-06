@@ -42,8 +42,8 @@
 using namespace OpenMM;
 using namespace std;
 
-RPMDIntegrator::RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, const map<int, int>& contractions) :
-        numCopies(numCopies), applyThermostat(true), contractions(contractions), forcesAreValid(false), hasSetPosition(false), hasSetVelocity(false), isFirstStep(true) {
+RPMDIntegrator::RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, const map<int, int>& contractions, bool openPath) :
+        numCopies(numCopies), applyThermostat(true), useOpenPath(openPath), contractions(contractions), forcesAreValid(false), hasSetPosition(false), hasSetVelocity(false), isFirstStep(true) {
     setTemperature(temperature);
     setFriction(frictionCoeff);
     setStepSize(stepSize);
@@ -51,8 +51,8 @@ RPMDIntegrator::RPMDIntegrator(int numCopies, double temperature, double frictio
     setRandomNumberSeed(0);
 }
 
-RPMDIntegrator::RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize) :
-        numCopies(numCopies), applyThermostat(true), forcesAreValid(false), hasSetPosition(false), hasSetVelocity(false), isFirstStep(true) {
+RPMDIntegrator::RPMDIntegrator(int numCopies, double temperature, double frictionCoeff, double stepSize, bool openPath) :
+        numCopies(numCopies), applyThermostat(true), useOpenPath(openPath), forcesAreValid(false), hasSetPosition(false), hasSetVelocity(false), isFirstStep(true) {
     setTemperature(temperature);
     setFriction(frictionCoeff);
     setStepSize(stepSize);
@@ -221,4 +221,196 @@ double RPMDIntegrator::getTotalEnergy() {
         prevState = state;
     }
     return energy;
+}
+
+double RPMDIntegrator::getKineticEnergyPrimitiveEstimator() {
+    if (useOpenPath) 
+        throw OpenMMException("Cannot use primitive energy estimator for LePIGS!");   
+
+    const System& system = owner->getSystem();
+    int numParticles = system.getNumParticles();
+    double energy = 0.0;
+    const double hbar = 1.054571628e-34 * AVOGADRO / (1000 * 1e-12);
+    const double wn = numCopies * BOLTZ * temperature / hbar;
+    State prevState = getState(numCopies-1, State::Positions);
+    
+    int numVirtualParticles = 0;
+
+    for (int j = 0; j < numParticles; j++) {
+        if (system.getParticleMass(j) == 0.0)
+            numVirtualParticles += 1;
+    }                
+    
+    for (int i = 0; i < numCopies; i++) {
+
+        // Add the energy of this copy.
+
+        State state = getState(i, State::Positions);
+
+        // Add the energy from the springs connecting it to the previous copy.
+
+        for (int j = 0; j < numParticles; j++) {
+            Vec3 delta = state.getPositions()[j]-prevState.getPositions()[j];
+            energy -= 0.5 * wn * wn * system.getParticleMass(j) * delta.dot(delta) / numCopies;
+        }
+        prevState = state;
+    }
+    energy += 1e-3*3*(numParticles - numVirtualParticles)*numCopies*BOLTZMANN*temperature*AVOGADRO / 2;
+    return energy;
+}
+
+double RPMDIntegrator::getKineticEnergyVirialEstimator() {
+    if (useOpenPath) 
+        throw OpenMMException("Cannot use primitive energy estimator for LePIGS!");
+
+    const System& system = owner->getSystem();
+    int numParticles = system.getNumParticles();
+    double energy = 0.0;
+
+    for (int i = 0; i < numCopies; i++) {
+
+        // Add the energy of this copy.
+
+        State state = getState(i, State::Positions | State::Forces);
+
+        for (int j = 0; j < numParticles; j++) {
+            if (system.getParticleMass(j) == 0.0){
+                continue;
+            }
+
+            Vec3 position = state.getPositions()[j];
+            Vec3 force = state.getForces()[j];
+
+            energy -= 0.5 * position.dot(force);
+        }
+    }
+    return energy / numCopies;
+}
+
+double RPMDIntegrator::getKineticEnergyCentroidVirialEstimator() {
+    if (useOpenPath) 
+        throw OpenMMException("Cannot use primitive energy estimator for LePIGS!");
+    
+    const System& system = owner->getSystem();
+    int numParticles = system.getNumParticles();
+    double energy = 0.0;
+    int numVirtualParticles = 0;
+
+    for (int j = 0; j < numParticles; j++) {
+        if (system.getParticleMass(j) == 0.0)
+            numVirtualParticles += 1;
+    }
+
+    vector<Vec3> positionsC;
+
+    for (int j = 0; j < numParticles; j++) {
+        Vec3 positionC(0.0, 0.0, 0.0);
+        for (int i = 0; i < numCopies; i++) { 
+            State state = getState(i, State::Positions);
+            positionC += state.getPositions()[j];
+        }
+        positionC /= numCopies;
+        positionsC.push_back(positionC);
+    }
+
+    for (int i = 0; i < numCopies; i++) {
+
+        State state = getState(i, State::Positions | State::Forces);
+
+        // Add the energy from the springs connecting it to the previous copy.
+
+        for (int j = 0; j < numParticles; j++) {
+            if (system.getParticleMass(j) == 0.0){
+                continue;
+            }
+
+            Vec3 position = state.getPositions()[j] - positionsC[j];
+            Vec3 force = state.getForces()[j];
+
+            energy -= 0.5 * position.dot(force);
+        }
+    }
+    energy /= numCopies;
+    energy += 1e-3*3*(numParticles - numVirtualParticles)*BOLTZMANN*temperature*AVOGADRO / 2;
+
+    return energy;
+}
+
+double RPMDIntegrator::getPotentialEnergy() {
+    const System& system = owner->getSystem();
+    int numParticles = system.getNumParticles();
+    double energy = 0.0;
+
+    if (useOpenPath) {
+        // Add the energy of the middle copy for LePIGS.
+
+        State state = getState(floor(numCopies/2), State::Energy);
+        return state.getPotentialEnergy();
+    }
+        
+    for (int i = 0; i < numCopies; i++) {
+
+        // Add the energy of this copy.
+
+        State state = getState(i, State::Energy);
+        energy += state.getPotentialEnergy();
+    }
+    return energy / numCopies;
+}
+
+double RPMDIntegrator::getTotalEnergyPIMD(int estimator) {
+
+    if (useOpenPath) {
+        State state1 = getState(0, State::Energy);
+        State stateP = getState(numCopies-1, State::Energy);
+        
+        return (state1.getPotentialEnergy() + stateP.getPotentialEnergy())/2;
+    }
+
+    double energy = getPotentialEnergy();
+
+    switch(estimator) {
+    case 0:
+        energy += getKineticEnergyPrimitiveEstimator();
+        break;
+    case 1:
+        energy += getKineticEnergyVirialEstimator();
+        break;
+    case 2:
+        energy += getKineticEnergyCentroidVirialEstimator();
+        break;
+    default:
+        throw OpenMMException("Specified estimator is not valid!");
+    }
+    return energy;
+}
+
+double RPMDIntegrator::getKineticTemperature(int subtractDOF) {
+    const System& system = owner->getSystem();
+    int numParticles = system.getNumParticles();
+    int numVirtualParticles = 0;
+
+    for (int j = 0; j < numParticles; j++) {
+        if (system.getParticleMass(j) == 0.0)
+            numVirtualParticles += 1;
+    }
+
+    double temp = 0.0;
+    const double factor = 1/(3*(numParticles-subtractDOF-numVirtualParticles)*numCopies*BOLTZ);
+
+    Vec3 vel;
+
+    for (int i = 0; i < numCopies; i++) {
+        // Add the energy of this copy.
+        State state = getState(i, State::Velocities);
+        
+        for (int j = 0; j < numParticles; j++) {
+            if (system.getParticleMass(j) == 0.0){
+                continue;
+            }
+            vel = state.getVelocities()[j];
+            temp += system.getParticleMass(j)*vel.dot(vel);
+        }
+    }
+    return factor*temp/numCopies;
 }

@@ -36,6 +36,7 @@
 #ifdef _MSC_VER
   #define POCKETFFT_NO_VECTORS
 #endif
+#define POCKETFFT_CACHE_SIZE 4096
 #include "pocketfft_hdronly.h"
 #include <complex>
 
@@ -105,7 +106,7 @@ void ReferenceIntegrateRPMDStepKernel::initialize(const System& system, const RP
     }
 }
 
-void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
+void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
     const int numCopies = positions.size();
     const int numParticles = positions[0].size();
     const double dt = integrator.getStepSize();
@@ -118,7 +119,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
     // Loop over copies and compute the force on each one.
     
     if (!forcesAreValid)
-        computeForces(context, integrator);
+        computeForcesClosedPath(context, integrator);
 
     // Apply the PILE-L thermostat.
     
@@ -130,6 +131,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
     const double twown = 2.0*nkT/hbar;
     const double c1_0 = exp(-halfdt*integrator.getFriction());
     const double c2_0 = sqrt(1.0-c1_0*c1_0);
+    
     if (integrator.getApplyThermostat()) {
         for (int particle = 0; particle < numParticles; particle++) {
             if (system.getParticleMass(particle) == 0.0)
@@ -138,7 +140,8 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
             for (int component = 0; component < 3; component++) {
                 for (int k = 0; k < numCopies; k++)
                     v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 0);
+                
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
 
                 // Apply a local Langevin thermostat to the centroid mode.
 
@@ -158,7 +161,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
                     if (k < numCopies-k)
                         v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
                 }
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 0);
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
                 for (int k = 0; k < numCopies; k++)
                     velocities[k][particle][component] = scale*v[k].real();
             }
@@ -182,21 +185,20 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
                 q[k] = complex<double>(scale*positions[k][particle][component], 0.0);
                 v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
             }
-            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 0);
-            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 0);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
             q[0] += v[0]*dt;
             for (int k = 1; k < numCopies; k++) {
                 const double wk = twown*sin(k*M_PI/numCopies);
                 const double wt = wk*dt;
                 const double coswt = cos(wt);
                 const double sinwt = sin(wt);
-                const double wm = wk*system.getParticleMass(particle);
                 const complex<double> vprime = v[k]*coswt - q[k]*(wk*sinwt); // Advance velocity from t to t+dt
                 q[k] = v[k]*(sinwt/wk) + q[k]*coswt; // Advance position from t to t+dt
                 v[k] = vprime;
             }
-            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 0);
-            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 0);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
             for (int k = 0; k < numCopies; k++) {
                 positions[k][particle][component] = scale*q[k].real();
                 velocities[k][particle][component] = scale*v[k].real();
@@ -206,7 +208,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
     
     // Calculate forces based on the updated positions.
     
-    computeForces(context, integrator);
+    computeForcesClosedPath(context, integrator);
 
     // Update velocities.
     
@@ -225,7 +227,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
             for (int component = 0; component < 3; component++) {
                 for (int k = 0; k < numCopies; k++)
                     v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 0);
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
 
                 // Apply a local Langevin thermostat to the centroid mode.
 
@@ -245,7 +247,7 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
                     if (k < numCopies-k)
                         v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
                 }
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 0);
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
                 for (int k = 0; k < numCopies; k++)
                     velocities[k][particle][component] = scale*v[k].real();
             }
@@ -255,9 +257,169 @@ void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDI
     // Update the time.
     
     context.setTime(context.getTime()+dt);
+    context.setStepCount(context.getStepCount() + 1);
 }
 
-void ReferenceIntegrateRPMDStepKernel::computeForces(ContextImpl& context, const RPMDIntegrator& integrator) {
+void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
+    const int numCopies = positions.size();
+    const int numParticles = positions[0].size();
+    const double dt = integrator.getStepSize();
+    const double halfdt = 0.5*dt;
+    const System& system = context.getSystem();
+    vector<Vec3>& pos = extractPositions(context);
+    vector<Vec3>& vel = extractVelocities(context);
+    vector<Vec3>& f = extractForces(context);
+    
+    // Loop over copies and compute the force on each one.
+    
+    if (!forcesAreValid)
+        computeForcesOpenPath(context, integrator);
+
+    // Apply the PILE-L thermostat.
+
+    vector<double> v(numCopies);
+    vector<double> q(numCopies);
+    const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
+    //const double nkT = (numCopies)*BOLTZ*integrator.getTemperature();
+    const double nkTm1 = (numCopies-1)*BOLTZ*integrator.getTemperature();
+    const double twown = 2.0*nkTm1/hbar;
+    const double c1_0 = exp(-halfdt*integrator.getFriction());
+    const double c2_0 = sqrt(1.0-c1_0*c1_0);
+    double norm = sqrt(2. * numCopies);
+    double fct = 1./norm;
+    bool ortho = true;
+
+    if (integrator.getApplyThermostat()) {
+        for (int particle = 0; particle < numParticles; particle++) {
+            if (system.getParticleMass(particle) == 0.0)
+                continue;
+            const double c3_0 = c2_0*sqrt(nkTm1/system.getParticleMass(particle));
+            for (int component = 0; component < 3; component++) {
+                for (int k = 0; k < numCopies; k++) {
+                    v[k] = (velocities[k][particle][component]);
+                }
+
+                pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, v.data(), v.data(), fct, ortho, 0);
+
+                v[0]=(v[0]*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+
+                // Use critical damping white noise for the remaining modes.
+
+                for (int k = 1; k < numCopies; k++) {
+                    const double wk = twown*sin(k*M_PI/numCopies/2.);
+                    const double c1 = exp(-2.0*wk*halfdt);
+                    const double c2 = sqrt((1.0-c1*c1)); ///2);
+                    const double c3 = c2*sqrt(nkTm1/system.getParticleMass(particle));
+                    double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
+                    v[k] = v[k]*c1 + rand1;
+                }
+
+                pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, v.data(), v.data(), fct, ortho, 0);
+                for (int k = 0; k < numCopies; k++) {
+                    velocities[k][particle][component] = v[k];
+                }
+            }
+        }
+    }
+
+    // Update velocities.
+    
+    for (int i = 0; i < numCopies; i++)
+        for (int j = 0; j < numParticles; j++)
+            if (system.getParticleMass(j) != 0.0) {
+                velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
+            }
+    // Evolve the free ring polymer by transforming to the frequency domain.
+
+    for (int particle = 0; particle < numParticles; particle++) {
+        if (system.getParticleMass(particle) == 0.0)
+            continue;
+        for (int component = 0; component < 3; component++) {
+            for (int k = 0; k < numCopies; k++) {
+                q[k] = (positions[k][particle][component]);
+                v[k] = (velocities[k][particle][component]);
+            }
+            pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, q.data(), q.data(), fct, ortho, 0);
+            pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, v.data(), v.data(), fct, ortho, 0);
+
+            q[0] += v[0]*dt;
+            for (int k = 1; k < numCopies; k++) {
+                const double wk = twown*sin(k*M_PI/numCopies/2.);
+                const double wt = wk*dt;
+                const double coswt = cos(wt);
+                const double sinwt = sin(wt);
+                const double wm = wk*system.getParticleMass(particle);
+                const double vprime = v[k]*coswt - q[k]*(wk*sinwt); // Advance velocity from t to t+dt
+                q[k] = v[k]*(sinwt/wk) + q[k]*coswt; // Advance position from t to t+dt
+                v[k] = vprime;
+            }
+
+            pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, q.data(), q.data(), fct, ortho,0);
+            pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, v.data(), v.data(), fct, ortho, 0);
+            for (int k = 0; k < numCopies; k++) {
+                positions[k][particle][component] = q[k];
+                velocities[k][particle][component] = v[k];
+            }
+        }
+    }
+    
+    // Calculate forces based on the updated positions.
+    
+    computeForcesOpenPath(context, integrator);
+
+    // Update velocities.
+    
+    for (int i = 0; i < numCopies; i++)
+        for (int j = 0; j < numParticles; j++)
+            if (system.getParticleMass(j) != 0.0) {
+                velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
+            }
+    // Apply the PILE-L thermostat again.
+    
+    if (integrator.getApplyThermostat()) {
+        for (int particle = 0; particle < numParticles; particle++) {
+            if (system.getParticleMass(particle) == 0.0)
+                continue;
+            const double c3_0 = c2_0*sqrt(nkTm1/system.getParticleMass(particle));
+            for (int component = 0; component < 3; component++) {
+                for (int k = 0; k < numCopies; k++)
+                    v[k] = (velocities[k][particle][component]);
+                pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, v.data(), v.data(), fct, ortho, 0);
+
+                // Apply a local Langevin thermostat to the centroid mode.
+
+                v[0]=(v[0]*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+
+                // Use critical damping white noise for the remaining modes.
+
+                for (int k = 1; k < numCopies; k++) {
+                    const double wk = twown*sin(k*M_PI/numCopies/2.);
+                    const double c1 = exp(-2.0*wk*halfdt);
+                    const double c2 = sqrt((1.0-c1*c1)); ///2);
+                    const double c3 = c2*sqrt(nkTm1/system.getParticleMass(particle));
+                    double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
+                    v[k] = v[k]*c1 + rand1;
+                }
+
+                pocketfft::dct({(size_t) numCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, v.data(), v.data(), fct, ortho, 0);
+                for (int k = 0; k < numCopies; k++)
+                    velocities[k][particle][component] = v[k];
+            }
+        }
+    }
+    
+    // Update the time.
+    
+    context.setTime(context.getTime()+dt);
+    context.setStepCount(context.getStepCount()+1);
+}
+
+void ReferenceIntegrateRPMDStepKernel::execute(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
+    if (integrator.getUseOpenPath()) executeOpenPath(context, integrator, forcesAreValid);
+    else executeClosedPath(context, integrator, forcesAreValid);
+}
+
+void ReferenceIntegrateRPMDStepKernel::computeForcesClosedPath(ContextImpl& context, const RPMDIntegrator& integrator) {
     const int totalCopies = positions.size();
     const int numParticles = positions[0].size();
     vector<Vec3>& pos = extractPositions(context);
@@ -299,13 +461,13 @@ void ReferenceIntegrateRPMDStepKernel::computeForces(ContextImpl& context, const
                 
                 for (int k = 0; k < totalCopies; k++)
                     q[k] = complex<double>(positions[k][particle][component], 0.0);
-                pocketfft::c2c({(size_t) totalCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 0);
+                pocketfft::c2c({(size_t) totalCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
                 if (copies > 1) {
                     int start = (copies+1)/2;
                     int end = totalCopies-copies+start;
                     for (int k = end; k < totalCopies; k++)
                         q[k-(totalCopies-copies)] = q[k];
-                    pocketfft::c2c({(size_t) copies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 0);
+                    pocketfft::c2c({(size_t) copies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
                 }
                 for (int k = 0; k < copies; k++)
                     contractedPositions[k][particle][component] = scale1*q[k].real();
@@ -331,16 +493,122 @@ void ReferenceIntegrateRPMDStepKernel::computeForces(ContextImpl& context, const
                 for (int k = 0; k < copies; k++)
                     q[k] = complex<double>(contractedForces[k][particle][component], 0.0);
                 if (copies > 1)
-                    pocketfft::c2c({(size_t) copies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 0);
+                    pocketfft::c2c({(size_t) copies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
                 int start = (copies+1)/2;
                 int end = totalCopies-copies+start;
                 for (int k = end; k < totalCopies; k++)
                     q[k] = q[k-(totalCopies-copies)];
                 for (int k = start; k < end; k++)
                     q[k] = complex<double>(0, 0);
-                pocketfft::c2c({(size_t) totalCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 0);
+                pocketfft::c2c({(size_t) totalCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
                 for (int k = 0; k < totalCopies; k++)
                     forces[k][particle][component] += scale2*q[k].real();
+            }
+        }
+    }
+}
+
+void ReferenceIntegrateRPMDStepKernel::computeForcesOpenPath(ContextImpl& context, const RPMDIntegrator& integrator) {
+    const int totalCopies = positions.size();
+    const int numParticles = positions[0].size();
+    vector<Vec3>& pos = extractPositions(context);
+    vector<Vec3>& vel = extractVelocities(context);
+    vector<Vec3>& f = extractForces(context);
+    
+    // Compute forces from all groups that didn't have a specified contraction.
+    
+    for (int i = 0; i < totalCopies; i++) {
+        pos = positions[i];
+        vel = velocities[i];
+        context.computeVirtualSites();
+        Vec3 initialBox[3];
+        context.getPeriodicBoxVectors(initialBox[0], initialBox[1], initialBox[2]);
+        context.updateContextState();
+        Vec3 finalBox[3];
+        context.getPeriodicBoxVectors(finalBox[0], finalBox[1], finalBox[2]);
+        if (initialBox[0] != finalBox[0] || initialBox[1] != finalBox[1] || initialBox[2] != finalBox[2])
+            throw OpenMMException("Standard barostats cannot be used with RPMDIntegrator.  Use RPMDMonteCarloBarostat instead.");
+        positions[i] = pos;
+        velocities[i] = vel;
+        context.calcForcesAndEnergy(true, false, groupsNotContracted);
+        forces[i] = f;
+    }
+
+    // first and last beads experience half the potential so half the force
+    for (int i = 0; i < numParticles; i++) {
+        forces[0][i] *= 0.5;
+        forces[totalCopies-1][i] *= 0.5;
+    }
+
+    // Now loop over contractions and compute forces from them.
+    
+    // PIGS not yet implemented for contractions
+
+    for (auto& g : groupsByCopies) {
+
+        throw OpenMMException("Contractions are not implemented for LePIGS!");
+
+        int copies = g.first;
+        int groupFlags = g.second;
+        
+        // Find the contracted positions.
+        
+        vector<double> q(totalCopies);
+        const double scale1 = 1.0/totalCopies;
+        double norm = sqrt(2. * totalCopies);
+        double fct = 1./norm;
+        bool ortho = true;
+
+        for (int particle = 0; particle < numParticles; particle++) {
+            for (int component = 0; component < 3; component++) {
+                // Transform to the frequency domain, set high frequency components to zero, and transform back.
+                
+                for (int k = 0; k < totalCopies; k++)
+                    q[k] = (positions[k][particle][component]);
+                pocketfft::dct({(size_t) totalCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, q.data(), q.data(), fct, ortho,  0);
+
+
+                if (copies > 1) {
+                    int start = (copies+1)/2;
+                    int end = totalCopies-copies+start;
+                    for (int k = end; k < totalCopies; k++)
+                        q[k-(totalCopies-copies)] = q[k];
+                    pocketfft::dct({(size_t) copies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, q.data(), q.data(), fct, ortho , 0);
+                }
+                for (int k = 0; k < copies; k++)
+                    contractedPositions[k][particle][component] = scale1*q[k];
+            }
+        }
+        
+        // Compute forces.
+
+        for (int i = 0; i < copies; i++) {
+            pos = contractedPositions[i];
+            context.computeVirtualSites();
+            context.calcForcesAndEnergy(false , false, groupFlags);
+            contractedForces[i] = f;
+        }
+        
+        // Apply the forces to the original copies.
+        
+        const double scale2 = 1.0/copies;
+        for (int particle = 0; particle < numParticles; particle++) {
+            for (int component = 0; component < 3; component++) {
+                // Transform to the frequency domain, pad with zeros, and transform back.
+                
+                for (int k = 0; k < copies; k++)
+                    q[k] = (contractedForces[k][particle][component], 0.0);
+                if (copies > 1)
+                    pocketfft::dct({(size_t) copies}, {sizeof(double)}, {sizeof(double)}, {0}, 2, q.data(), q.data(), fct, ortho , 0);
+                int start = (copies+1)/2;
+                int end = totalCopies-copies+start;
+                for (int k = end; k < totalCopies; k++)
+                    q[k] = q[k-(totalCopies-copies)];
+                for (int k = start; k < end; k++)
+                    q[k] = 0;
+                pocketfft::dct({(size_t) totalCopies}, {sizeof(double)}, {sizeof(double)}, {0}, 3, q.data(), q.data(), fct, ortho , 0);
+                for (int k = 0; k < totalCopies; k++)
+                    forces[k][particle][component] += scale2*q[k];
             }
         }
     }
