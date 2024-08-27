@@ -140,182 +140,160 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
     //vector<Vec3>& vel = extractVelocities(context);
     //vector<Vec3>& f = extractForces(context);
     
-    //#pragma omp parallel shared(positions, velocities, forces, system) firstprivate(numCopies, numParticles)
-    {
-        
-        // Loop over copies and compute the force on each one.
-        
-        //#pragma omp single
-        { 
-            if (!forcesAreValid)
-                computeForcesClosedPath(context, integrator);
-        }
-        // Apply the PILE-L thermostat.
+    
+    // Loop over copies and compute the force on each one.
+    
+    if (!forcesAreValid)
+        computeForcesClosedPath(context, integrator);
+    
+    // Apply the PILE-L thermostat.
 
-        vector<complex<double>> v(numCopies);
-        vector<complex<double>> q(numCopies);
-        const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
-        const double scale = 1.0/sqrt((double) numCopies);
-        const double nkT = numCopies*BOLTZ*integrator.getTemperature();
-        const double twown = 2.0*nkT/hbar;
-        const double c1_0 = exp(-halfdt*integrator.getFriction());
-        const double c2_0 = sqrt(1.0-c1_0*c1_0);
-        
-        
-        if (integrator.getApplyThermostat()) {
-            //#pragma omp for
-            for (int particle = 0; particle < numParticles; particle++) {
+    vector<complex<double>> v(numCopies);
+    vector<complex<double>> q(numCopies);
+    const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
+    const double scale = 1.0/sqrt((double) numCopies);
+    const double nkT = numCopies*BOLTZ*integrator.getTemperature();
+    const double twown = 2.0*nkT/hbar;
+    const double c1_0 = exp(-halfdt*integrator.getFriction());
+    const double c2_0 = sqrt(1.0-c1_0*c1_0);
+    
+    
+    if (integrator.getApplyThermostat()) {
+        for (int particle = 0; particle < numParticles; particle++) {
 
-                //std::cout << "Current thread number: " << omp_get_thread_num() << std::endl;
+            if (system.getParticleMass(particle) == 0.0)
+                continue;
+            const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
+            for (int component = 0; component < 3; component++) {
+                for (int k = 0; k < numCopies; k++)
+                    v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
+                
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
 
-                if (system.getParticleMass(particle) == 0.0)
-                    continue;
-                const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
-                for (int component = 0; component < 3; component++) {
-                    for (int k = 0; k < numCopies; k++)
-                        v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
-                    
-                    pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
+                // Apply a local Langevin thermostat to the centroid mode.
 
-                    // Apply a local Langevin thermostat to the centroid mode.
+                v[0].real(v[0].real()*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
 
-                    v[0].real(v[0].real()*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+                // Use critical damping white noise for the remaining modes.
 
-                    // Use critical damping white noise for the remaining modes.
-
-                    for (int k = 1; k <= numCopies/2; k++) {
-                        const bool isCenter = (numCopies%2 == 0 && k == numCopies/2);
-                        const double wk = twown*sin(k*M_PI/numCopies);
-                        const double c1 = exp(-2.0*wk*halfdt);
-                        const double c2 = sqrt((1.0-c1*c1)/2) * (isCenter ? sqrt(2.0) : 1.0);
-                        const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
-                        double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
-                        double rand2 = (isCenter ? 0.0 : c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
-                        v[k] = v[k]*c1 + complex<double>(rand1, rand2);
-                        if (k < numCopies-k)
-                            v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
-                    }
-                    pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
-                    for (int k = 0; k < numCopies; k++)
-                        velocities[k][particle][component] = scale*v[k].real();
+                for (int k = 1; k <= numCopies/2; k++) {
+                    const bool isCenter = (numCopies%2 == 0 && k == numCopies/2);
+                    const double wk = twown*sin(k*M_PI/numCopies);
+                    const double c1 = exp(-2.0*wk*halfdt);
+                    const double c2 = sqrt((1.0-c1*c1)/2) * (isCenter ? sqrt(2.0) : 1.0);
+                    const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
+                    double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
+                    double rand2 = (isCenter ? 0.0 : c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+                    v[k] = v[k]*c1 + complex<double>(rand1, rand2);
+                    if (k < numCopies-k)
+                        v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
                 }
+                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
+                for (int k = 0; k < numCopies; k++)
+                    velocities[k][particle][component] = scale*v[k].real();
             }
         }
-        
+    }
+    
 
-        // Update velocities.
+    // Update velocities.
 
-        //#pragma omp single
+    for (int i = 0; i < numCopies; i++)
+        for (int j = 0; j < numParticles; j++)
+            if (system.getParticleMass(j) != 0.0)
+                velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
+    
+    
+    // Evolve the free ring polymer by transforming to the frequency domain.
+    for (int particle = 0; particle < numParticles; particle++) {
+        if (system.getParticleMass(particle) == 0.0)
+            continue;
         
-        {
-            for (int i = 0; i < numCopies; i++)
-                for (int j = 0; j < numParticles; j++)
-                    if (system.getParticleMass(j) != 0.0)
-                        velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
+        vector<complex<double>> v(numCopies);
+        vector<complex<double>> q(numCopies);
+        
+        for (int component = 0; component < 3; component++) {
+
+            for (int k = 0; k < numCopies; k++) {
+                q[k] = complex<double>(scale*positions[k][particle][component], 0.0);
+                v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
+            }
+
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
+            q[0] += v[0]*dt;
+            
+            for (int k = 1; k < numCopies; k++) {
+                const double wk = twown*sin(k*M_PI/numCopies);
+                const double wt = wk*dt;
+                const double coswt = cos(wt);
+                const double sinwt = sin(wt);
+                const complex<double> vprime = v[k]*coswt - q[k]*(wk*sinwt); // Advance velocity from t to t+dt
+                q[k] = v[k]*(sinwt/wk) + q[k]*coswt; // Advance position from t to t+dt
+                v[k] = vprime;
+            }
+
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
+            pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
+            
+            for (int k = 0; k < numCopies; k++) {
+                positions[k][particle][component] = scale*q[k].real();
+                velocities[k][particle][component] = scale*v[k].real();
+            }
         }
-        
-        // Evolve the free ring polymer by transforming to the frequency domain.
-        #pragma omp parallel for
+    }
+    
+    // Calculate forces based on the updated positions.
+    
+    computeForcesClosedPath(context, integrator);
+    
+    // Update velocities.
+    
+    for (int i = 0; i < numCopies; i++)
+        for (int j = 0; j < numParticles; j++)
+            if (system.getParticleMass(j) != 0.0) 
+                velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
+    
+    // Apply the PILE-L thermostat again.
+    
+    if (integrator.getApplyThermostat()) {
         for (int particle = 0; particle < numParticles; particle++) {
             if (system.getParticleMass(particle) == 0.0)
                 continue;
-            
-            vector<complex<double>> v(numCopies);
-            vector<complex<double>> q(numCopies);
-            
+            const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
             for (int component = 0; component < 3; component++) {
-
-                for (int k = 0; k < numCopies; k++) {
-                    q[k] = complex<double>(scale*positions[k][particle][component], 0.0);
+                for (int k = 0; k < numCopies; k++)
                     v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
-                }
-
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
                 pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
-                q[0] += v[0]*dt;
-                
-                for (int k = 1; k < numCopies; k++) {
+
+                // Apply a local Langevin thermostat to the centroid mode.
+
+                v[0].real(v[0].real()*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+
+                // Use critical damping white noise for the remaining modes.
+
+                for (int k = 1; k <= numCopies/2; k++) {
+                    const bool isCenter = (numCopies%2 == 0 && k == numCopies/2);
                     const double wk = twown*sin(k*M_PI/numCopies);
-                    const double wt = wk*dt;
-                    const double coswt = cos(wt);
-                    const double sinwt = sin(wt);
-                    const complex<double> vprime = v[k]*coswt - q[k]*(wk*sinwt); // Advance velocity from t to t+dt
-                    q[k] = v[k]*(sinwt/wk) + q[k]*coswt; // Advance position from t to t+dt
-                    v[k] = vprime;
+                    const double c1 = exp(-2.0*wk*halfdt);
+                    const double c2 = sqrt((1.0-c1*c1)/2) * (isCenter ? sqrt(2.0) : 1.0);
+                    const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
+                    double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
+                    double rand2 = (isCenter ? 0.0 : c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
+                    v[k] = v[k]*c1 + complex<double>(rand1, rand2);
+                    if (k < numCopies-k)
+                        v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
                 }
-
-                pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
                 pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
-                
-                for (int k = 0; k < numCopies; k++) {
-                    positions[k][particle][component] = scale*q[k].real();
+                for (int k = 0; k < numCopies; k++)
                     velocities[k][particle][component] = scale*v[k].real();
-                }
             }
         }
-        
-        // Calculate forces based on the updated positions.
-        
-        //#pragma omp single
-        {
-        //computeForcesClosedPath(context, integrator);
-        
-        // Update velocities.
-        
-        for (int i = 0; i < numCopies; i++)
-            for (int j = 0; j < numParticles; j++)
-                if (system.getParticleMass(j) != 0.0) 
-                    velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
-        
-        }
-        
-        // Apply the PILE-L thermostat again.
-        
-        if (integrator.getApplyThermostat()) {
-            //#pragma omp for
-            for (int particle = 0; particle < numParticles; particle++) {
-                if (system.getParticleMass(particle) == 0.0)
-                    continue;
-                const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
-                for (int component = 0; component < 3; component++) {
-                    for (int k = 0; k < numCopies; k++)
-                        v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
-                    pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
-
-                    // Apply a local Langevin thermostat to the centroid mode.
-
-                    v[0].real(v[0].real()*c1_0 + c3_0*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
-
-                    // Use critical damping white noise for the remaining modes.
-
-                    for (int k = 1; k <= numCopies/2; k++) {
-                        const bool isCenter = (numCopies%2 == 0 && k == numCopies/2);
-                        const double wk = twown*sin(k*M_PI/numCopies);
-                        const double c1 = exp(-2.0*wk*halfdt);
-                        const double c2 = sqrt((1.0-c1*c1)/2) * (isCenter ? sqrt(2.0) : 1.0);
-                        const double c3 = c2*sqrt(nkT/system.getParticleMass(particle));
-                        double rand1 = c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber();
-                        double rand2 = (isCenter ? 0.0 : c3*SimTKOpenMMUtilities::getNormallyDistributedRandomNumber());
-                        v[k] = v[k]*c1 + complex<double>(rand1, rand2);
-                        if (k < numCopies-k)
-                            v[numCopies-k] = v[numCopies-k]*c1 + complex<double>(rand1, -rand2);
-                    }
-                    pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
-                    for (int k = 0; k < numCopies; k++)
-                        velocities[k][particle][component] = scale*v[k].real();
-                }
-            }
-        }
-        
-        
-        // Update the time.
-        //#pragma omp single
-        {
-            context.setTime(context.getTime()+dt);
-            context.setStepCount(context.getStepCount() + 1);
-        }
-        
     }
+    
+    // Update the time.
+    context.setTime(context.getTime()+dt);
+    context.setStepCount(context.getStepCount() + 1);        
 }
 
 void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
