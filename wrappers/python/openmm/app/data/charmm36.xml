@@ -103763,4 +103763,12 @@
     <NBFixPair epsilon="0.8631592000000001" sigma="0.25134925534893393" type1="MG" type2="SO"/>
     <NBFixPair epsilon="0.8414024" sigma="0.25219560913116723" type1="MG" type2="SS1"/>
   </LennardJonesForce>
+  <InitializationScript>
+EXPECTED_VERSION = "charmm36"
+if hasattr(self, "_charmm_ff_version"):
+    if self._charmm_ff_version != EXPECTED_VERSION:
+        raise RuntimeError(f"CHARMM force field versions ({self._charmm_ff_version} and {EXPECTED_VERSION}) incompatible")
+else:
+    self._charmm_ff_version = EXPECTED_VERSION
+  </InitializationScript>
 </ForceField>

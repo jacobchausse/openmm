@@ -529,7 +529,21 @@ class TestAPIUnits(unittest.TestCase):
     def testATMForce(self):
         """Tests the ATMForce API features"""
         force = ATMForce(0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.6, 0.8, -1.0);
+
+        #particle 0: fixed displacements, 
         force.addParticle(Vec3(1, 2, 3), Vec3(4, 5, 6))
+
+        #particle 1: fixed displacements using a Transformation object
+        p = force.addParticle()
+        force.setParticleTransformation(p, FixedDisplacement(Vec3(7, 8, 9), Vec3(10, 11, 12)))
+
+        #particle 2: particle distance displacement 
+        p = force.addParticle()
+        force.setParticleTransformation(p, ParticleOffsetDisplacement(1, 0))
+
+        #particle 3: stationary particle
+        force.addParticle()
+
         self.assertEqual(0.1, force.getGlobalParameterDefaultValue(0))
         self.assertEqual(0.2, force.getGlobalParameterDefaultValue(1))
         self.assertEqual(0.3, force.getGlobalParameterDefaultValue(2))
@@ -539,9 +553,31 @@ class TestAPIUnits(unittest.TestCase):
         self.assertEqual(0.6, force.getGlobalParameterDefaultValue(6))
         self.assertEqual(0.8, force.getGlobalParameterDefaultValue(7))
         self.assertEqual(-1.0, force.getGlobalParameterDefaultValue(8))
+
         d1, d0 = force.getParticleParameters(0)
         self.assertEqual(Vec3(1, 2, 3)*nanometers, d1)
         self.assertEqual(Vec3(4, 5, 6)*nanometers, d0)
+
+        fixed_displacement_transformation = force.getParticleTransformation(1)
+        d1 = fixed_displacement_transformation.getFixedDisplacement1()
+        d0 = fixed_displacement_transformation.getFixedDisplacement0()
+        self.assertEqual(Vec3(7, 8, 9)*nanometers, d1)
+        self.assertEqual(Vec3(10, 11, 12)*nanometers, d0)
+
+        vectordistance_displacement_transformation = force.getParticleTransformation(2)
+        j1 = vectordistance_displacement_transformation.getDestinationParticle1()
+        i1 = vectordistance_displacement_transformation.getOriginParticle1()
+        j0 = vectordistance_displacement_transformation.getDestinationParticle0()
+        i0 = vectordistance_displacement_transformation.getOriginParticle0()
+        self.assertEqual( 1, j1)
+        self.assertEqual( 0, i1)
+        self.assertEqual(-1, j0)
+        self.assertEqual(-1, i0)
+
+        transformation = force.getParticleTransformation(3)
+        d1, d0 = force.getParticleParameters(3)
+        self.assertEqual(Vec3(0, 0, 0)*nanometers, d1)
+        self.assertEqual(Vec3(0, 0, 0)*nanometers, d0)
 
     def testDrudeForce(self):
         """ Tests the DrudeForce API features """
@@ -639,14 +675,14 @@ class TestAPIUnits(unittest.TestCase):
 
         self.assertEqual(force.getNumParticles(), 2)
 
-        q, r, s = force.getParticleParameters(0)
+        q, r, s, d, k = force.getParticleParameters(0)
         self.assertAlmostEqualUnit(q, 1.0*coulomb)
         self.assertIs(q.unit, elementary_charge)
         self.assertEqual(r, 1.0*angstroms)
         self.assertIs(r.unit, nanometer)
         self.assertEqual(s, 0.5)
 
-        q, r, s = force.getParticleParameters(1)
+        q, r, s, d, k = force.getParticleParameters(1)
         self.assertAlmostEqualUnit(q, 1.0*elementary_charge)
         self.assertIs(q.unit, elementary_charge)
         self.assertEqual(r, 1.0*nanometer)
@@ -759,44 +795,47 @@ class TestAPIUnits(unittest.TestCase):
 
         self.assertEqual(force.getNumParticles(), 3)
 
-        p, sig, eps, scale, alchemical, type = force.getParticleParameters(0)
+        p, sig, eps, reduction, alchemical, type, scale = force.getParticleParameters(0)
         self.assertEqual(p, 0)
         self.assertEqual(sig, 0.1*nanometers)
         self.assertIs(sig.unit, nanometers)
         self.assertEqual(eps, 1.0*kilojoules_per_mole)
         self.assertIs(eps.unit, kilojoules_per_mole)
-        self.assertEqual(scale, 1.0)
+        self.assertEqual(reduction, 1.0)
         self.assertEqual(type, -1)
+        self.assertEqual(scale, 1.0)
 
-        p, sig, eps, scale, alchemical, type = force.getParticleParameters(1)
+        p, sig, eps, reduction, alchemical, type, scale = force.getParticleParameters(1)
         self.assertEqual(p, 1)
         self.assertEqual(sig, 1.0*angstroms)
         self.assertIs(sig.unit, nanometers)
         self.assertEqual(eps, 1.0*kilocalories_per_mole)
         self.assertIs(eps.unit, kilojoules_per_mole)
-        self.assertEqual(scale, 0.5)
+        self.assertEqual(reduction, 0.5)
         self.assertEqual(type, -1)
+        self.assertEqual(scale, 1.0)
 
-        p, sig, eps, scale, alchemical, type = force.getParticleParameters(2)
+        p, sig, eps, reduction, alchemical, type, scale = force.getParticleParameters(2)
         self.assertEqual(p, 1)
         self.assertAlmostEqualUnit(sig, 0.8*angstroms)
         self.assertIs(sig.unit, nanometers)
         self.assertEqual(eps, 2.0*kilocalories_per_mole)
         self.assertIs(eps.unit, kilojoules_per_mole)
-        self.assertEqual(scale, 0.25)
+        self.assertEqual(reduction, 0.25)
         self.assertEqual(type, -1)
+        self.assertEqual(scale, 1.0)
 
     def testAmoebaWcaDispersionForce(self):
         """ Tests the AmoebaWcaDispersionForce API features """
         force = AmoebaWcaDispersionForce()
 
-        self.assertEqual(force.getDispoff(), 0.26*nanometer)
-        self.assertEqual(force.getAwater(), 0.033428*nanometer**-3)
-        self.assertEqual(force.getEpsh(), 0.0135*kilojoule_per_mole)
-        self.assertEqual(force.getEpso(), 0.11*kilojoule_per_mole)
-        self.assertEqual(force.getRminh(), 1.3275*nanometer)
-        self.assertEqual(force.getRmino(), 1.7025*nanometer)
-        self.assertEqual(force.getShctd(), 0.81)
+        self.assertEqual(force.getDispoff(), 0.1056*nanometer)
+        self.assertEqual(force.getAwater(), 33.428*nanometer**-3)
+        self.assertEqual(force.getEpsh(), 0.056484*kilojoule_per_mole)
+        self.assertEqual(force.getEpso(), 0.46024000000000004*kilojoule_per_mole)
+        self.assertEqual(force.getRminh(), 0.13275*nanometer)
+        self.assertEqual(force.getRmino(), 0.17025*nanometer)
+        self.assertEqual(force.getShctd(), 0.82)
         self.assertEqual(force.getSlevy(), 1.0)
 
         force.setDispoff(3*angstroms)
@@ -1085,6 +1124,23 @@ class TestAPIUnits(unittest.TestCase):
 
         integrator = CustomIntegrator(1.0*femtoseconds)
         self.assertEqual(integrator.getStepSize(), 1.0*femtoseconds)
+
+    def testQTBIntegrator(self):
+        """ Tests the LangevinIntegrator API features """
+        integrator = QTBIntegrator(300, 0.1, 0.001)
+        self.assertEqual(integrator.getTemperature(), 300*kelvin)
+        self.assertEqual(integrator.getFriction(), 0.1/picosecond)
+        self.assertEqual(integrator.getStepSize(), 0.001*picosecond)
+
+        integrator = QTBIntegrator(300*kelvin, 0.1/microsecond, 1*femtosecond)
+        self.assertEqual(integrator.getTemperature(), 300*kelvin)
+        self.assertAlmostEqualUnit(integrator.getFriction(), 0.1/microsecond)
+        self.assertEqual(integrator.getStepSize(), 1*femtosecond)
+
+        integrator.setSegmentLength(0.5)
+        self.assertEqual(integrator.getSegmentLength(), 0.5*picosecond)
+        integrator.setSegmentLength(100*femtosecond)
+        self.assertEqual(integrator.getSegmentLength(), 0.1*picosecond)
 
 if __name__ == '__main__':
     unittest.main()

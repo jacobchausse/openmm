@@ -1,5 +1,6 @@
 from collections import defaultdict
 import unittest
+import random
 
 from validateModeller import *
 from openmm.app import *
@@ -980,6 +981,33 @@ class TestModeller(unittest.TestCase):
             names1 = sorted([a.name for a in res1.atoms()])
             names2 = sorted([a.name for a in res2.atoms()])
             self.assertEqual(names1, names2)
+        # Reset the loaded definitions so we don't affect other tests.
+        Modeller._residueHydrogens = {}
+        Modeller._hasLoadedStandardHydrogens = False
+
+    def test_addSpecificHydrogens(self):
+        """Test specifying exactly which hydrogens to add."""
+        pdb = PDBFile('systems/glycopeptide.pdb')
+        variants = [None]*pdb.topology.getNumResidues()
+        for residue in pdb.topology.residues():
+            if residue.name != 'ALA':
+                var = []
+                for atom1, atom2 in residue.bonds():
+                    if atom1.element == element.hydrogen:
+                        var.append((atom1.name, atom2.name))
+                    elif atom2.element == element.hydrogen:
+                        var.append((atom2.name, atom1.name))
+                variants[residue.index] = var
+        modeller = Modeller(pdb.topology, pdb.positions)
+        hydrogens = [a for a in modeller.topology.atoms() if a.element == element.hydrogen and random.random() < 0.7]
+        modeller.delete(hydrogens)
+        self.assertTrue(modeller.topology.getNumAtoms() < pdb.topology.getNumAtoms())
+        modeller.addHydrogens(variants=variants)
+        self.assertEqual(modeller.topology.getNumAtoms(), pdb.topology.getNumAtoms())
+        for res1, res2 in zip(pdb.topology.residues(), modeller.topology.residues()):
+            names1 = sorted([a.name for a in res1.atoms()])
+            names2 = sorted([a.name for a in res2.atoms()])
+            self.assertEqual(names1, names2)
 
     def test_removeExtraHydrogens(self):
         """Test that addHydrogens() can remove hydrogens that shouldn't be there. """
@@ -1059,7 +1087,7 @@ class TestModeller(unittest.TestCase):
         residue = topology.addResidue('Test', chain)
         topology.addAtom('C', element.carbon, residue)
         topology.addAtom('N', element.nitrogen, residue)
-        topology.addAtom('V', element.oxygen, residue)
+        topology.addAtom('O', element.oxygen, residue)
 
 
         # Add the virtual sites.
@@ -1085,6 +1113,54 @@ class TestModeller(unittest.TestCase):
         state = context.getState(getPositions=True)
         for p1, p2 in zip (pos, state.getPositions()):
             self.assertVecAlmostEqual(p1.value_in_unit(nanometers), p2.value_in_unit(nanometers), 1e-6)
+
+
+    def testNestedVirtualSites(self):
+        """Test adding virtual sites that depend on other virtual sites."""
+        xml = """
+            <ForceField>
+             <AtomTypes>
+              <Type name="C" class="C" element="C" mass="10"/>
+              <Type name="N" class="N" element="N" mass="10"/>
+              <Type name="V" class="V" mass="0.0"/>
+             </AtomTypes>
+             <Residues>
+              <Residue name="Test">
+               <Atom name="C" type="C"/>
+               <Atom name="N" type="N"/>
+               <Atom name="V1" type="V"/>
+               <Atom name="V2" type="V"/>
+               <VirtualSite type="average2" index="2" atom1="0" atom2="1" weight1="0.5" weight2="0.5"/>
+               <VirtualSite type="average2" index="3" atom1="0" atom2="2" weight1="0.5" weight2="0.5"/>
+              </Residue>
+             </Residues>
+            </ForceField>"""
+        ff = ForceField(StringIO(xml))
+
+        # Create the three real atoms.
+
+        topology = Topology()
+        chain = topology.addChain()
+        residue = topology.addResidue('Test', chain)
+        topology.addAtom('C', element.carbon, residue)
+        topology.addAtom('N', element.nitrogen, residue)
+
+        # Add the virtual sites.
+
+        modeller = Modeller(topology, [Vec3(0.0, 0.0, 0.0), Vec3(1.0, 0.0, 0.0)]*nanometers)
+        modeller.addExtraParticles(ff)
+        top = modeller.topology
+        pos = modeller.positions
+
+        # Check that the correct particles were added.
+
+        self.assertEqual(len(pos), 4)
+        for atom, elem in zip(top.atoms(), [element.carbon, element.nitrogen, None, None]):
+            self.assertEqual(elem, atom.element)
+
+        # The positions of the first virtual site should be correct, but the second one won't be.
+
+        self.assertVecAlmostEqual(Vec3(0.5, 0.0, 0.0), pos[2].value_in_unit(nanometers), 1e-6)
 
 
     def test_multiSiteIon(self):

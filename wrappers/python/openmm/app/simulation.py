@@ -34,6 +34,7 @@ __version__ = "1.0"
 
 import openmm as mm
 import openmm.unit as unit
+from openmm.app.internal import safesave
 import sys
 from datetime import datetime, timedelta
 try:
@@ -206,9 +207,23 @@ class Simulation(object):
             
             anyReport = False
             for i, reporter in enumerate(self.reporters):
-                nextReport[i] = reporter.describeNextReport(self)
-                if nextReport[i][0] > 0 and nextReport[i][0] <= nextSteps:
-                    nextSteps = nextReport[i][0]
+                report = reporter.describeNextReport(self)
+                # convert to new dict format if the report is in the old tuple format
+                if isinstance(report, tuple):
+                    report_dict = {'steps': report[0]}
+
+                    if len(report) > 5:
+                        report_dict['periodic'] = report[5]
+
+                    includes = ['positions', 'velocities', 'forces', 'energy']
+                    report_dict['include'] = [includes[i] for i in range(4) if report[i+1]]
+                    report = report_dict
+                nextReport[i] = report
+                
+                steps = nextReport[i]['steps']
+
+                if steps > 0 and steps <= nextSteps:
+                    nextSteps = steps
                     anyReport = True
             stepsToGo = nextSteps
             while stepsToGo > 10:
@@ -226,19 +241,16 @@ class Simulation(object):
                 unwrapped = []
                 either = []
                 for reporter, report in zip(self.reporters, nextReport):
-                    if report[0] == nextSteps:
-                        if len(report) > 5:
-                            wantWrap = report[5]
-                            if wantWrap is None:
-                                wantWrap = self._usesPBC
-                        else:
-                            wantWrap = self._usesPBC
-                        if not report[1]:
+                    if report['steps'] == nextSteps:
+                        wantWrap = self._usesPBC if report.get('periodic') is None else report['periodic']
+
+                        if not 'positions' in report['include']: # if no positions are requested, we don't care about pbc
                             either.append((reporter, report))
                         elif wantWrap:
                             wrapped.append((reporter, report))
                         else:
                             unwrapped.append((reporter, report))
+
                 if len(wrapped) > len(unwrapped):
                     wrapped += either
                 else:
@@ -252,23 +264,22 @@ class Simulation(object):
                     self._generate_reports(unwrapped, False)
     
     def _generate_reports(self, reports, periodic):
-        getPositions = False
-        getVelocities = False
-        getForces = False
-        getEnergy = False
-        for reporter, next in reports:
-            if next[1]:
-                getPositions = True
-            if next[2]:
-                getVelocities = True
-            if next[3]:
-                getForces = True
-            if next[4]:
-                getEnergy = True
-        state = self.context.getState(positions=getPositions, velocities=getVelocities, forces=getForces,
-                                      energy=getEnergy, parameters=True, enforcePeriodicBox=periodic,
-                                      groups=self.context.getIntegrator().getIntegrationForceGroups())
-        for reporter, next in reports:
+        '''Generate reports for all requested reporters
+
+        Parameters
+        ----------
+        reports :  list of tuples
+                each tuple in the list contains a reporter object and a description of the next report produced by reporter.describeNextReport().
+                Note that the old format of returning a tuple from reporter.describeNextReport() is not supported in this function.
+        periodic : bool
+                Specifies whether particle positions should be translated so the center of every molecule lies in the same periodic box.
+        '''
+        
+        includes = set.union(*[set(report[1]['include']) for report in reports])
+        includeArgs = {property:True for property in includes}
+
+        state = self.context.getState(groups=self.context.getIntegrator().getIntegrationForceGroups(), enforcePeriodicBox=periodic, parameters=True, **includeArgs)
+        for reporter, nextReport in reports:
             reporter.report(self, state)
 
     def saveCheckpoint(self, file):
@@ -290,8 +301,7 @@ class Simulation(object):
             filename
         """
         if isinstance(file, str):
-            with open(file, 'wb') as f:
-                f.write(self.context.createCheckpoint())
+            safesave.save(self.context.createCheckpoint(), file)
         else:
             file.write(self.context.createCheckpoint())
 
@@ -331,8 +341,7 @@ class Simulation(object):
         state = self.context.getState(positions=True, velocities=True, parameters=True, integratorParameters=True)
         xml = mm.XmlSerializer.serialize(state)
         if isinstance(file, str):
-            with open(file, 'w') as f:
-                f.write(xml)
+            safesave.save(xml, file)
         else:
             file.write(xml)
 

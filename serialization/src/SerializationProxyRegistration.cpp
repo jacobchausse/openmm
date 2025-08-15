@@ -6,7 +6,7 @@
  * Biological Structures at Stanford, funded under the NIH Roadmap for        *
  * Medical Research, grant U54 GM072970. See https://simtk.org.               *
  *                                                                            *
- * Portions copyright (c) 2010-2021 Stanford University and the Authors.      *
+ * Portions copyright (c) 2010-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -47,6 +47,8 @@
 #include "openmm/CustomManyParticleForce.h"
 #include "openmm/CustomNonbondedForce.h"
 #include "openmm/CustomTorsionForce.h"
+#include "openmm/CustomVolumeForce.h"
+#include "openmm/DPDIntegrator.h"
 #include "openmm/GayBerneForce.h"
 #include "openmm/GBSAOBCForce.h"
 #include "openmm/HarmonicAngleForce.h"
@@ -60,7 +62,9 @@
 #include "openmm/NonbondedForce.h"
 #include "openmm/NoseHooverIntegrator.h"
 #include "openmm/PeriodicTorsionForce.h"
+#include "openmm/QTBIntegrator.h"
 #include "openmm/RBTorsionForce.h"
+#include "openmm/RGForce.h"
 #include "openmm/RMSDForce.h"
 #include "openmm/System.h"
 #include "openmm/TabulatedFunction.h"
@@ -87,6 +91,8 @@
 #include "openmm/serialization/CustomManyParticleForceProxy.h"
 #include "openmm/serialization/CustomNonbondedForceProxy.h"
 #include "openmm/serialization/CustomTorsionForceProxy.h"
+#include "openmm/serialization/CustomVolumeForceProxy.h"
+#include "openmm/serialization/DPDIntegratorProxy.h"
 #include "openmm/serialization/GayBerneForceProxy.h"
 #include "openmm/serialization/GBSAOBCForceProxy.h"
 #include "openmm/serialization/HarmonicAngleForceProxy.h"
@@ -100,7 +106,9 @@
 #include "openmm/serialization/NonbondedForceProxy.h"
 #include "openmm/serialization/NoseHooverIntegratorProxy.h"
 #include "openmm/serialization/PeriodicTorsionForceProxy.h"
+#include "openmm/serialization/QTBIntegratorProxy.h"
 #include "openmm/serialization/RBTorsionForceProxy.h"
+#include "openmm/serialization/RGForceProxy.h"
 #include "openmm/serialization/RMSDForceProxy.h"
 #include "openmm/serialization/StateProxy.h"
 #include "openmm/serialization/SystemProxy.h"
@@ -145,9 +153,11 @@ extern "C" void registerSerializationProxies() {
     SerializationProxy::registerProxy(typeid(CustomManyParticleForce), new CustomManyParticleForceProxy());
     SerializationProxy::registerProxy(typeid(CustomNonbondedForce), new CustomNonbondedForceProxy());
     SerializationProxy::registerProxy(typeid(CustomTorsionForce), new CustomTorsionForceProxy());
+    SerializationProxy::registerProxy(typeid(CustomVolumeForce), new CustomVolumeForceProxy());
     SerializationProxy::registerProxy(typeid(Discrete1DFunction), new Discrete1DFunctionProxy());
     SerializationProxy::registerProxy(typeid(Discrete2DFunction), new Discrete2DFunctionProxy());
     SerializationProxy::registerProxy(typeid(Discrete3DFunction), new Discrete3DFunctionProxy());
+    SerializationProxy::registerProxy(typeid(DPDIntegrator), new DPDIntegratorProxy());
     SerializationProxy::registerProxy(typeid(GayBerneForce), new GayBerneForceProxy());
     SerializationProxy::registerProxy(typeid(GBSAOBCForce), new GBSAOBCForceProxy());
     SerializationProxy::registerProxy(typeid(HarmonicAngleForce), new HarmonicAngleForceProxy());
@@ -161,7 +171,9 @@ extern "C" void registerSerializationProxies() {
     SerializationProxy::registerProxy(typeid(NonbondedForce), new NonbondedForceProxy());
     SerializationProxy::registerProxy(typeid(NoseHooverIntegrator), new NoseHooverIntegratorProxy());
     SerializationProxy::registerProxy(typeid(PeriodicTorsionForce), new PeriodicTorsionForceProxy());
+    SerializationProxy::registerProxy(typeid(QTBIntegrator), new QTBIntegratorProxy());
     SerializationProxy::registerProxy(typeid(RBTorsionForce), new RBTorsionForceProxy());
+    SerializationProxy::registerProxy(typeid(RGForce), new RGForceProxy());
     SerializationProxy::registerProxy(typeid(RMSDForce), new RMSDForceProxy());
     SerializationProxy::registerProxy(typeid(System), new SystemProxy());
     SerializationProxy::registerProxy(typeid(State), new StateProxy());

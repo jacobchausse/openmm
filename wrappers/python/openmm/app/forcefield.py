@@ -6,9 +6,9 @@ Simbios, the NIH National Center for Physics-Based Simulation of
 Biological Structures at Stanford, funded under the NIH Roadmap for
 Medical Research, grant U54 GM072970. See https://simtk.org.
 
-Portions copyright (c) 2012-2024 Stanford University and the Authors.
+Portions copyright (c) 2012-2025 Stanford University and the Authors.
 Authors: Peter Eastman, Mark Friedrichs
-Contributors:
+Contributors: Evan Pretti
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
@@ -40,7 +40,8 @@ import math
 import warnings
 from math import sqrt, cos
 from copy import deepcopy
-from collections import defaultdict
+from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 import openmm as mm
 import openmm.unit as unit
 from . import element as elem
@@ -58,6 +59,12 @@ def _getDataDirectories():
         _dataDirectories = [os.path.join(os.path.dirname(__file__), 'data')]
         try:
             from importlib_metadata import entry_points
+        except:
+            try:
+                from importlib.metadata import entry_points
+            except:
+                pass
+        try:
             for entry in entry_points().select(group='openmm.forcefielddir'):
                 _dataDirectories.append(entry.load()())
         except:
@@ -239,29 +246,24 @@ class ForceField(object):
         i = 0
         while i < len(files):
             file = files[i]
-            tree = None
-            try:
-                # this handles either filenames or open file-like objects
-                tree = etree.parse(file)
-            except IOError:
+            # this handles either filenames or open file-like objects
+            if isinstance(file, str) and not os.path.isfile(file):
                 for dataDir in _getDataDirectories():
                     f = os.path.join(dataDir, file)
                     if os.path.isfile(f):
-                        tree = etree.parse(f)
+                        file = f
                         break
+            try:
+                tree = etree.parse(file)
+            except FileNotFoundError:
+                raise ValueError('Could not locate file "%s"' % file)
             except Exception as e:
                 # Fail with an error message about which file could not be read.
-                # TODO: Also handle case where fallback to 'data' directory encounters problems,
-                # but this is much less worrisome because we control those files.
-                msg  = str(e) + '\n'
                 if hasattr(file, 'name'):
                     filename = file.name
                 else:
                     filename = str(file)
-                msg += "ForceField.loadFile() encountered an error reading file '%s'\n" % filename
-                raise Exception(msg)
-            if tree is None:
-                raise ValueError('Could not locate file "%s"' % file)
+                raise Exception('ForceField.loadFile() encountered an error reading file "%s": %s' % (filename, e))
 
             trees.append(tree)
             i += 1
@@ -438,7 +440,8 @@ class ForceField(object):
         if name in self._atomTypes:
             #  allow multiple registrations of the same atom type provided the definitions are identical
             existing = self._atomTypes[name]
-            if existing.atomClass == parameters['class'] and existing.mass == float(parameters['mass']) and existing.element.symbol == parameters['element']:
+            elementsMatch = ((existing.element is None and 'element' not in parameters) or (existing.element is not None and 'element' in parameters and existing.element.symbol == parameters['element']))
+            if existing.atomClass == parameters['class'] and existing.mass == float(parameters['mass']) and elementsMatch:
                 return
             raise ValueError('Found multiple definitions for atom type: '+name)
         atomClass = parameters['class']
@@ -864,6 +867,7 @@ class ForceField(object):
                         newSite = deepcopy(site)
                         newSite.index = indexMap[site.index]
                         newSite.atoms = [indexMap[i] for i in site.atoms]
+                        newSite.excludeWith = indexMap[site.excludeWith]
                         newTemplate.virtualSites.append(newSite)
 
                 # Build the lists of bonds and external bonds.
@@ -1036,7 +1040,7 @@ class ForceField(object):
                 t1, m1 = allMatches[0]
                 for t2, m2 in allMatches[1:]:
                     if not t1.areParametersIdentical(t2, m1, m2):
-                        raise Exception('Multiple non-identical matching templates found for residue %d (%s): %s.' % (res.index+1, res.name, ', '.join(match[0].name for match in allMatches)))
+                        raise Exception('Multiple non-identical matching templates found for residue %d (%s): %s.' % (res.index, res.name, ', '.join(match[0].name for match in allMatches)))
                 template = allMatches[0][0]
                 matches = allMatches[0][1]
         return [template, matches]
@@ -1428,7 +1432,7 @@ class ForceField(object):
                     template = self._templates[tname]
                     matches = compiled.matchResidueToTemplate(res, template, data.bondedToAtom, ignoreExternalBonds, ignoreExtraParticles)
                     if matches is None:
-                        raise Exception('User-supplied template %s does not match the residue %d (%s)' % (tname, res.index+1, res.name))
+                        raise Exception('User-supplied template %s does not match the residue %d (%s)' % (tname, res.index, res.name))
                 else:
                     # Attempt to match one of the existing templates.
                     [template, matches] = self._getResidueTemplateMatches(res, data.bondedToAtom, ignoreExternalBonds=ignoreExternalBonds, ignoreExtraParticles=ignoreExtraParticles)
@@ -1463,7 +1467,7 @@ class ForceField(object):
                             # We successfully generated a residue template.  Break out of the for loop.
                             break
             if matches is None:
-                raise ValueError('No template found for residue %d (%s).  %s  For more information, see https://github.com/openmm/openmm/wiki/Frequently-Asked-Questions#template' % (res.index+1, res.name, _findMatchErrors(self, res)))
+                raise ValueError('No template found for residue %d (%s).  %s  For more information, see https://github.com/openmm/openmm/wiki/Frequently-Asked-Questions#template' % (res.index, res.name, _findMatchErrors(self, res)))
             else:
                 if recordParameters:
                     data.recordMatchedAtomParameters(res, template, matches)
@@ -1791,62 +1795,226 @@ def _applyMultiResiduePatch(data, clusters, patch, candidateTemplates, selectedT
 
 def _findMatchErrors(forcefield, res):
     """Try to guess why a residue failed to match any template and return an error message."""
-    residueCounts = _countResidueAtoms([atom.element for atom in res.atoms()])
-    numResidueAtoms = sum(residueCounts.values())
-    numResidueHeavyAtoms = sum(residueCounts[element] for element in residueCounts if element not in (None, elem.hydrogen))
 
-    # Loop over templates and see how closely each one might match.
+    def counterSubtract(counter1, counter2):
+        """Subtracts two Counter objects (equivalent to counter1 - counter2 but preserves negatives)."""
+        difference = counter1.copy()
+        difference.subtract(counter2)
+        return difference
 
-    bestMatchName = None
-    numBestMatchAtoms = 3*numResidueAtoms
-    numBestMatchHeavyAtoms = 2*numResidueHeavyAtoms
-    for templateName in forcefield._templates:
+    def elemToNum(elem):
+        """Returns the atomic number of an element or 0 for None."""
+        return 0 if elem is None else elem.atomic_number
+
+    def makeIntBondSpec(bond):
+        """Converts an internal bond to (x, y) where x and y are atomic numbers of the bonded atoms' elements, and x < y."""
+        elemNum1 = elemToNum(bond[0].element)
+        elemNum2 = elemToNum(bond[1].element)
+        return min(elemNum1, elemNum2), max(elemNum1, elemNum2)
+
+    def makeExtBondSpec(bond):
+        """Converts an external bond to the atomic number of the element of the non-external atom."""
+        return elemToNum(bond.atom1.element) if bond.atom1.residue is res else elemToNum(bond.atom2.element)
+
+    def bestMatchAtom(templatesDiffs, templateNames, useHeavy):
+        """Finds the best matching templates based on atoms, optionally ignoring non-heavy atoms."""
+        bestMatches = []
+        bestScore = None
+        for templateName in templateNames:
+            # Find the (signed) differences in atom counts for all elements,
+            # optionally considering only heavy atoms.
+            allDiffs = templatesDiffs[templateName].items()
+            diffs = [(elemNum, diff) for elemNum, diff in allDiffs if not useHeavy or elemNum > 1]
+            # Build a score as (x, y), where y is the sum of the magnitudes of
+            # the differences in element counts, and x is a flag set if the
+            # residue has more of any element than the template.  Minimizing the
+            # score will, when these tuples are compared, favor templates where
+            # the residue is missing atoms first, and only if there are none,
+            # include templates for which the residue has extra atoms.
+            score = (any(diff > 0 for _, diff in allDiffs), sum(abs(diff) for _, diff in diffs))
+            if bestScore is None or score <= bestScore:
+                # Keep a list of every template with the lowest score seen.
+                if score != bestScore:
+                    # If bestScore is None or score < bestScore, clear the list.
+                    bestMatches.clear()
+                    bestScore = score
+                bestMatches.append(templateName)
+        return bestMatches, bestScore
+
+    def bestMatchBond(templatesDiffs, templateNames):
+        """Finds the best matching templates based on bonds."""
+        bestMatches = []
+        bestScore = None
+        for templateName in templateNames:
+            diffs = templatesDiffs[templateName].items()
+            # Favor templates where the residue is missing bonds first, and if
+            # there are none, include templates where it has extra bonds.
+            score = (any(diff > 0 for _, diff in diffs), sum(abs(diff) for _, diff in diffs))
+            if bestScore is None or score <= bestScore:
+                if score != bestScore:
+                    bestMatches.clear()
+                    bestScore = score
+                bestMatches.append(templateName)
+        return bestMatches, bestScore
+
+    def joinMessages(messages):
+        """Produce a human-readable message from the individual message strings passed."""
+        messages = list(messages)
+        if len(messages) < 3:
+            return ' and '.join(messages)
+        messages[-1] = f'and {messages[-1]}'
+        return ', '.join(messages)
+
+    def formatDiffMessage(diffs, formatter):
+        """Formats a message describing a difference between a residue and a template."""
+        missing, extra = [], []
+        for key, diff in diffs.items():
+            if diff < 0:
+                missing.append((key, -diff))
+            if diff > 0:
+                extra.append((key, diff))
+        messages = []
+        if missing:
+            message = joinMessages(f'{diff} {formatter(key, diff)}' for key, diff in sorted(missing))
+            messages.append(f'is missing {message}')
+        if extra:
+            message = joinMessages(f'{diff} {formatter(key, diff)}' for key, diff in sorted(extra))
+            messages.append(f'has {message} too many')
+        return joinMessages(messages)
+
+    def formatAtomDiff(key, diff):
+        """Formats a string describing an element associated with a different number of atoms."""
+        return (f'{elem.Element.getByAtomicNumber(key).symbol} atom' if key else 'extra site') + ('' if diff == 1 else 's')
+
+    def formatBondDiff(key, diff):
+        """Formats a string describing elements associated with a different number of bonds."""
+        name1 = elem.Element.getByAtomicNumber(key[0]).symbol if key else 'extra site'
+        name2 = elem.Element.getByAtomicNumber(key[1]).symbol if key else 'extra site'
+        return f'{name1}-{name2} bond' + ('' if diff == 1 else 's')
+
+    def pickBestMatch(bestMatches):
+        """If there are multiple best-scoring matches, pick one with the closest name to the residue.  Call only with a non-empty list."""
+        if not res.name:
+            return bestMatches[0]
+        return max(bestMatches, key=lambda match: SequenceMatcher(a=res.name.strip(), b=match.strip(), autojunk=False).ratio())
+
+    # First check to see if there are no templates in the force field.
+
+    if not forcefield._templates:
+        return f'The force field contains no residue templates.'
+
+    # Get all elements in all templates in the force field and see if this
+    # residue uses an element not supported.  Otherwise, prepare fingerprints of
+    # the residue and templates based on counts of the elements of their atoms.
+
+    supportedElements = set(elemToNum(atom.element) for template in forcefield._templates.values() for atom in template.atoms)
+    residueAtomCounts = Counter(elemToNum(atom.element) for atom in res.atoms())
+    unsupportedElements = set(residueAtomCounts.keys()) - supportedElements
+    if unsupportedElements:
+        unsupportedMessage = joinMessages(formatAtomDiff(elemNum, 0) for elemNum in sorted(unsupportedElements))
+        return f'The residue contains {unsupportedMessage}, which are not supported by any template in the force field.'
+
+    # It will be useful to provide a special message if this is a terminal
+    # residue of the chain, since this is a common cause of topology problems.
+
+    chainResidues = list(res.chain.residues())
+    if len(chainResidues) > 1 and (res == chainResidues[0] or res == chainResidues[-1]):
+        terminalMessage = '  Is the chain terminated in a way that is unsupported by the force field?'
+    else:
+        terminalMessage = ''
+
+    def makeTemplateAtomDiff(templateName):
+        """Prepares a Counter describing the difference between a residue's and a template's atoms."""
         template = forcefield._templates[templateName]
-        templateCounts = _countResidueAtoms([atom.element for atom in template.atoms])
+        return counterSubtract(residueAtomCounts, Counter(elemToNum(atom.element) for atom in template.atoms))
 
-        # Does the residue have any atoms that clearly aren't in the template?
+    templatesAtomDiffs = {templateName: makeTemplateAtomDiff(templateName) for templateName in forcefield._templates}
 
-        if any(element not in templateCounts or templateCounts[element] < residueCounts[element] for element in residueCounts):
-            continue
+    # Compare the residue with templates, first based on heavy atoms, then if
+    # templates are found where all heavy atoms match, on all atoms.
 
-        # If there are too many missing atoms, discard this template.
+    bestMatches = templatesAtomDiffs.keys()
 
-        numTemplateAtoms = sum(templateCounts.values())
-        numTemplateHeavyAtoms = sum(templateCounts[element] for element in templateCounts if element not in (None, elem.hydrogen))
-        if numTemplateAtoms > numBestMatchAtoms:
-            continue
-        if numTemplateHeavyAtoms > numBestMatchHeavyAtoms:
-            continue
+    bestMatches, bestScore = bestMatchAtom(templatesAtomDiffs, bestMatches, True)
+    if bestMatches and bestScore[1]:
+        # If there are matches found and the best score's sum is non-zero
+        # (an imperfect match), return.  Otherwise, if the best matches are
+        # perfect, keep filtering with additional criteria.
+        bestMatch = pickBestMatch(bestMatches)
+        return f'The set of atoms is similar to {bestMatch}, but {formatDiffMessage(templatesAtomDiffs[bestMatch], formatAtomDiff)}.{terminalMessage}'
+    bestMatches, bestScore = bestMatchAtom(templatesAtomDiffs, bestMatches, False)
+    if bestMatches and bestScore[1]:
+        bestMatch = pickBestMatch(bestMatches)
+        bestMatchDiffs = templatesAtomDiffs[bestMatch]
+        # Give additional help in the special cases where the residue is missing
+        # sites or hydrogen atoms and nothing else.
+        if bestMatchDiffs[0] < 0 and all(diff == 0 for key, diff in bestMatchDiffs.items() if key != 0):
+            specialLabel = 'it' if bestMatchDiffs[0] == -1 else 'them'
+            specialMessage = f'  You may be able to add {specialLabel} with Modeller.addExtraParticles().'
+        elif bestMatchDiffs[1] < 0 and all(diff == 0 for key, diff in bestMatchDiffs.items() if key != 1):
+            specialLabel = 'it' if bestMatchDiffs[1] == -1 else 'them'
+            specialMessage = f'  You may be able to add {specialLabel} with Modeller.addHydrogens().'
+        else:
+            specialMessage = terminalMessage
+        return f'The set of heavy atoms matches {bestMatch}, but the residue {formatDiffMessage(bestMatchDiffs, formatAtomDiff)}.{specialMessage}'
 
-        # If this template has the same number of missing atoms as our previous best one, look at the name
-        # to decide which one to use.
+    # We found templates that are atom-for-atom matches to the residue, so now
+    # prepare fingerprints of the residue and templates based on their bonds.
+    # The compare the residue with templates based on bonds.
 
-        if numTemplateAtoms == numBestMatchAtoms:
-            if bestMatchName == res.name or res.name not in templateName:
-                continue
+    residueIntBondCounts = Counter(makeIntBondSpec(bond) for bond in res.internal_bonds())
 
-        # Accept this as our new best match.
+    def makeTemplateIntBondDiff(templateName):
+        """Prepares a Counter describing the difference between a residue's and a template's bonds."""
+        template = forcefield._templates[templateName]
+        return counterSubtract(residueIntBondCounts, Counter(makeIntBondSpec((template.atoms[atom1], template.atoms[atom2])) for atom1, atom2 in template.bonds))
 
-        bestMatchName = templateName
-        numBestMatchAtoms = numTemplateAtoms
-        numBestMatchHeavyAtoms = numTemplateHeavyAtoms
-        numBestMatchExtraParticles = len([atom for atom in template.atoms if atom.element is None])
+    # We only need to prepare data for the templates remaining in bestMatches.
 
-    # Return an appropriate error message.
+    templatesIntBondDiffs = {templateName: makeTemplateIntBondDiff(templateName) for templateName in bestMatches}
 
-    if numBestMatchAtoms == numResidueAtoms:
-        chainResidues = list(res.chain.residues())
-        if len(chainResidues) > 1 and (res == chainResidues[0] or res == chainResidues[-1]):
-            return 'The set of atoms matches %s, but the bonds are different.  Perhaps the chain is missing a terminal group?' % bestMatchName
-        return 'The set of atoms matches %s, but the bonds are different.' % bestMatchName
-    if bestMatchName is not None:
-        if numBestMatchHeavyAtoms == numResidueHeavyAtoms:
-            numResidueExtraParticles = len([atom for atom in res.atoms() if atom.element is None])
-            if numResidueExtraParticles == 0 and numBestMatchExtraParticles == 0:
-                return 'The set of atoms is similar to %s, but it is missing %d hydrogen atoms.' % (bestMatchName, numBestMatchAtoms-numResidueAtoms)
-            if numBestMatchExtraParticles-numResidueExtraParticles == numBestMatchAtoms-numResidueAtoms:
-                return 'The set of atoms is similar to %s, but it is missing %d extra particles.  You can add them with Modeller.addExtraParticles().' % (bestMatchName, numBestMatchAtoms-numResidueAtoms)
-        return 'The set of atoms is similar to %s, but it is missing %d atoms.' % (bestMatchName, numBestMatchAtoms-numResidueAtoms)
+    bestMatches, bestScore = bestMatchBond(templatesIntBondDiffs, bestMatches)
+    if bestMatches and bestScore[1]:
+        bestMatch = pickBestMatch(bestMatches)
+        if not tuple(res.internal_bonds()):
+            # Special message when the residue is missing all internal bonds.
+            return (f'The set of atoms matches {bestMatch}, but the residue has no bonds between its atoms.  '
+                'If the topology was read from a PDB, it may contain non-standard residues/names and/or be missing CONECT records.')
+        return f'The set of atoms matches {bestMatch}, but the residue {formatDiffMessage(templatesIntBondDiffs[bestMatch], formatBondDiff)}.'
+
+    # Finally, check external bonds.  Normally these should always be from heavy
+    # atoms, so don't do separate checks excluding vs. including non-heavy atoms
+    # (but the check will work regardless).
+
+    residueExtBondCounts = Counter(makeExtBondSpec(bond) for bond in res.external_bonds())
+
+    def makeTemplateExtBondDiff(templateName):
+        """Prepares a Counter describing the difference between a residue's and a template's external bonds."""
+        template = forcefield._templates[templateName]
+        return counterSubtract(residueExtBondCounts, Counter(elemToNum(template.atoms[atom].element) for atom in template.externalBonds))
+
+    templatesExtBondDiffs = {templateName: makeTemplateExtBondDiff(templateName) for templateName in bestMatches}
+
+    bestMatches, bestScore = bestMatchAtom(templatesExtBondDiffs, bestMatches, False)
+    if bestMatches and bestScore[1]:
+        bestMatch = pickBestMatch(bestMatches)
+        bestMatchDiffs = templatesExtBondDiffs[bestMatch]
+        if all(value <= 0 for value in bestMatchDiffs.values()):
+            # Special message if external bonds are missing only, not different.
+            specialMessage = '  Is the chain missing a terminal capping group?'
+        else:
+            specialMessage = terminalMessage
+        return f'The atoms and bonds in the residue match {bestMatch}, but the set of externally bonded atoms {formatDiffMessage(bestMatchDiffs, formatAtomDiff)}.{specialMessage}'
+
+    # If we have matches at this point, atoms and bonds match perfectly, so the
+    # connectivity must be different.  If bestMatches is empty, something else
+    # went wrong, so return a generic error message.
+
+    if bestMatches:
+        # Display all possible matching templates at this point to try to help,
+        # since we can't give any more detailed information.
+        return f'The atoms and bonds in the residue match {joinMessages(bestMatches)}, but the connectivity is different.'
+
     return 'This might mean your input topology is missing some atoms or bonds, or possibly that you are using the wrong force field.'
 
 def _createResidueTemplate(residue):
@@ -2384,6 +2552,7 @@ class CMAPTorsionGenerator(object):
             ff.registerGenerator(generator)
         else:
             generator = existing[0]
+        mapOffset = len(generator.maps)
         for map in element.findall('Map'):
             values = [float(x) for x in map.text.split()]
             size = sqrt(len(values))
@@ -2393,7 +2562,7 @@ class CMAPTorsionGenerator(object):
         for torsion in element.findall('Torsion'):
             types = ff._findAtomTypes(torsion.attrib, 5)
             if None not in types:
-                generator.torsions.append(CMAPTorsion(types, int(torsion.attrib['map'])))
+                generator.torsions.append(CMAPTorsion(types, int(torsion.attrib['map']) + mapOffset))
 
     def createForce(self, sys, data, nonbondedMethod, nonbondedCutoff, args):
         existing = [f for f in sys.getForces() if type(f) == mm.CMAPTorsionForce]
@@ -2547,20 +2716,38 @@ class LennardJonesGenerator(object):
 
     def __init__(self, forcefield, lj14scale, useDispersionCorrection):
         self.ff = forcefield
-        self.nbfixTypes = {}
+        self.nbfixParameters = []
+        self.nbfixTypes1 = defaultdict(set)
+        self.nbfixTypes2 = defaultdict(set)
         self.lj14scale = lj14scale
         self.useDispersionCorrection = useDispersionCorrection
         self.ljTypes = ForceField._AtomTypeParameters(forcefield, 'LennardJonesForce', 'Atom', ('sigma', 'epsilon'))
 
     def registerNBFIX(self, parameters):
         types = self.ff._findAtomTypes(parameters, 2)
+
         if None not in types:
+            sigma = _convertParameterToNumber(parameters['sigma'])
+            epsilon = _convertParameterToNumber(parameters['epsilon'])
+
+            # Retrieve the index of nbfixParameters into which this sigma and
+            # epsilon will be stored, then register this index with the atom
+            # types that should have this sigma and epsilon applied.
+            nbfixIndex = len(self.nbfixParameters)
+            self.nbfixParameters.append([sigma, epsilon])
             for type1 in types[0]:
-                for type2 in types[1]:
-                    epsilon = _convertParameterToNumber(parameters['epsilon'])
-                    sigma = _convertParameterToNumber(parameters['sigma'])
-                    self.nbfixTypes[(type1, type2)] = [sigma, epsilon]
-                    self.nbfixTypes[(type2, type1)] = [sigma, epsilon]
+                self.nbfixTypes1[type1].add(nbfixIndex)
+            for type2 in types[1]:
+                self.nbfixTypes2[type2].add(nbfixIndex)
+
+    def getNBFIX(self, type1, type2):
+        nbfixIndices = (self.nbfixTypes1[type1] & self.nbfixTypes2[type2]) | (self.nbfixTypes2[type1] & self.nbfixTypes1[type2])
+        if nbfixIndices:
+            if len(nbfixIndices) > 1:
+                raise ValueError('Multiple NBFixPair entries match atom types %s-%s.' % (type1, type2))
+            return self.nbfixParameters[nbfixIndices.pop()]
+        else:
+            return None
 
     def registerLennardJones(self, parameters):
         self.ljTypes.registerAtom(parameters)
@@ -2599,7 +2786,7 @@ class LennardJonesGenerator(object):
         # First derive the lookup tables.  We need to include entries for every type
         # that a) appears in the system and b) has unique parameters.
 
-        nbfixTypeSet = set().union(*self.nbfixTypes)
+        nbfixTypeSet = {t for nbfixTypes in (self.nbfixTypes1, self.nbfixTypes2) for t in nbfixTypes if nbfixTypes[t]}
         allTypes = set(data.atomType[atom] for atom in data.atoms)
         mergedTypes = []
         mergedTypeParams = []
@@ -2630,10 +2817,9 @@ class LennardJonesGenerator(object):
         bcoef = acoef[:]
         for m in range(numLjTypes):
             for n in range(numLjTypes):
-                pair = (mergedTypes[m], mergedTypes[n])
-                if pair in self.nbfixTypes:
-                    epsilon = self.nbfixTypes[pair][1]
-                    sigma = self.nbfixTypes[pair][0]
+                nbfix = self.getNBFIX(mergedTypes[m], mergedTypes[n])
+                if nbfix is not None:
+                    sigma, epsilon = nbfix
                     sigma6 = sigma**6
                     acoef[m+numLjTypes*n] = 4*epsilon*sigma6*sigma6
                     bcoef[m+numLjTypes*n] = 4*epsilon*sigma6
@@ -2650,12 +2836,14 @@ class LennardJonesGenerator(object):
         self.force.addTabulatedFunction('bcoef', mm.Discrete2DFunction(numLjTypes, numLjTypes, bcoef))
         self.force.addPerParticleParameter('type')
         self.force.setName('LennardJones')
-        if nonbondedMethod in [CutoffPeriodic, Ewald, PME, LJPME]:
+        if nonbondedMethod in [CutoffPeriodic, Ewald, PME]:
             self.force.setNonbondedMethod(mm.CustomNonbondedForce.CutoffPeriodic)
         elif nonbondedMethod is NoCutoff:
             self.force.setNonbondedMethod(mm.CustomNonbondedForce.NoCutoff)
         elif nonbondedMethod is CutoffNonPeriodic:
             self.force.setNonbondedMethod(mm.CustomNonbondedForce.CutoffNonPeriodic)
+        elif nonbondedMethod is LJPME:
+            raise ValueError('LJPME is not supported by LennardJonesForce')
         else:
             raise AssertionError('Unrecognized nonbonded method [%s]' % nonbondedMethod)
         if args['switchDistance'] is not None:
@@ -2703,10 +2891,9 @@ class LennardJonesGenerator(object):
                 a1 = data.atoms[p1]
                 a2 = data.atoms[p2]
                 if (p1,p2) not in skip and (p2,p1) not in skip:
-                    type1 = data.atomType[a1]
-                    type2 = data.atomType[a2]
-                    if (type1, type2) in self.nbfixTypes:
-                        sigma, epsilon = self.nbfixTypes[(type1, type2)]
+                    nbfix = self.getNBFIX(data.atomType[a1], data.atomType[a2])
+                    if nbfix is not None:
+                        sigma, epsilon = nbfix
                     else:
                         values1 = self.ljTypes.getAtomParameters(a1, data)
                         values2 = self.ljTypes.getAtomParameters(a2, data)
@@ -3278,6 +3465,7 @@ class CustomManyParticleGenerator(object):
             generator.typeFilters.append((int(param.attrib['index']), [int(x) for x in param.attrib['types'].split(',')]))
         generator.params = ForceField._AtomTypeParameters(ff, 'CustomManyParticleForce', 'Atom', generator.perParticleParams)
         generator.params.parseDefinitions(element)
+        generator.functions += _parseFunctions(element)
 
     def createForce(self, sys, data, nonbondedMethod, nonbondedCutoff, args):
         methodMap = {NoCutoff:mm.CustomManyParticleForce.NoCutoff,

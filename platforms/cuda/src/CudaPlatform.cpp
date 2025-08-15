@@ -6,7 +6,7 @@
  * Biological Structures at Stanford, funded under the NIH Roadmap for        *
  * Medical Research, grant U54 GM072970. See https://simtk.org.               *
  *                                                                            *
- * Portions copyright (c) 2008-2024 Stanford University and the Authors.      *
+ * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -94,6 +94,7 @@ CudaPlatform::CudaPlatform() {
     registerKernelFactory(CalcCustomCPPForceKernel::Name(), factory);
     registerKernelFactory(CalcCustomCVForceKernel::Name(), factory);
     registerKernelFactory(CalcATMForceKernel::Name(), factory);
+    registerKernelFactory(CalcRGForceKernel::Name(), factory);
     registerKernelFactory(CalcRMSDForceKernel::Name(), factory);
     registerKernelFactory(CalcCustomManyParticleForceKernel::Name(), factory);
     registerKernelFactory(CalcGayBerneForceKernel::Name(), factory);
@@ -104,6 +105,8 @@ CudaPlatform::CudaPlatform() {
     registerKernelFactory(IntegrateVariableVerletStepKernel::Name(), factory);
     registerKernelFactory(IntegrateVariableLangevinStepKernel::Name(), factory);
     registerKernelFactory(IntegrateCustomStepKernel::Name(), factory);
+    registerKernelFactory(IntegrateDPDStepKernel::Name(), factory);
+    registerKernelFactory(IntegrateQTBStepKernel::Name(), factory);
     registerKernelFactory(ApplyAndersenThermostatKernel::Name(), factory);
     registerKernelFactory(ApplyMonteCarloBarostatKernel::Name(), factory);
     registerKernelFactory(RemoveCMMotionKernel::Name(), factory);

@@ -62,7 +62,7 @@ from . import customgbforces as customgb
 #=============================================================================================
 
 # A regex for extracting print format info from the FORMAT lines.
-FORMAT_RE_PATTERN=re.compile("([0-9]+)\(?([a-zA-Z]+)([0-9]+)\.?([0-9]*)\)?")
+FORMAT_RE_PATTERN=re.compile(r"([0-9]+)\(?([a-zA-Z]+)([0-9]+)\.?([0-9]*)\)?")
 
 # Pointer labels which map to pointer numbers at top of prmtop files
 POINTER_LABELS  = """
@@ -1037,6 +1037,8 @@ def readAmberSystem(topology, prmtop_filename=None, prmtop_loader=None, shake=No
 
     # Copy the exceptions as exclusions to the CustomNonbondedForce if we have
     # NBFIX terms
+    if nbfix and nonbondedMethod == 'LJPME':
+        raise ValueError('LJPME is not supported with modified off-diagonal Lennard-Jones coefficients')
     if nbfix or has_1264:
         for i in range(force.getNumExceptions()):
             ii, jj, chg, sig, eps = force.getExceptionParameters(i)
@@ -1440,14 +1442,9 @@ class AmberNetcdfRestart(object):
     """
     def __init__(self, filename, asNumpy=False):
         try:
-            from scipy.io import NetCDFFile
+            from scipy.io import netcdf_file
         except ImportError:
-            # scipy < 1.8.0
-            try:
-                from scipy.io.netcdf import NetCDFFile
-            except ImportError:
-                raise ImportError('scipy is necessary to parse NetCDF '
-                                  'restarts')
+            raise ImportError('scipy is necessary to parse NetCDF restarts')
 
         self.filename = filename
         self.velocities = self.boxVectors = self.time = None
@@ -1457,10 +1454,10 @@ class AmberNetcdfRestart(object):
         # to valid memory while the file handle is open. Since the context
         # manager GCs the ncfile handle, the memory for the original variables
         # is no longer valid. So copy those arrays while the handle is still
-        # open. This is unnecessary in scipy v.0.12 and lower because NetCDFFile
+        # open. This is unnecessary in scipy v.0.12 and lower because netcdf_file
         # accidentally leaks the file handle, but that was 'fixed' in 0.13. This
         # fix taken from MDTraj
-        ncfile = NetCDFFile(filename, 'r')
+        ncfile = netcdf_file(filename, 'r')
         try:
             self.natom = ncfile.dimensions['atom']
             self.coordinates = np.array(ncfile.variables['coordinates'][:])
