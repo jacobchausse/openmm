@@ -4,6 +4,8 @@ Other Features
 ##############
 
 
+.. _periodic-boundary-conditions:
+
 Periodic Boundary Conditions
 ****************************
 
@@ -188,6 +190,21 @@ specific types of rules.  They are:
 .. math::
    \mathbf{r}=\mathbf{o}+p_1\mathbf{\hat{x}}+p_2\mathbf{\hat{y}}+p_3\mathbf{\hat{z}}
 ..
+
+* SymmetrySite: The virtual site location is computed by applying a rotation and
+  translation to the position of a single other particle:
+
+.. math::
+   \mathbf{r}=\mathbf{R} \mathbf{r}_0 + \mathbf{v}
+..
+
+  where :math:`\mathbf{r}_0` is the position of the original particle,
+  :math:`\mathbf{R}` is a rotation matrix, and :math:`\mathbf{v}` is a fixed
+  vector.  The calculation can be performed either in Cartesian coordinates (for
+  example, to build a symmetric copy of a molecule to create a dimer) or in
+  fractional coordinates as defined by the periodic box (for example, to create
+  a crystallographic unit cell consisting of multiple identical molecules
+  related by symmetry).
 
 Random Numbers with Stochastic Integrators and Forces
 *****************************************************

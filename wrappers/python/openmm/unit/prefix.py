@@ -2,10 +2,8 @@
 """
 Module openmm.unit.prefix
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012 Stanford University and the Authors.
 Authors: Christopher M. Bruns
@@ -64,7 +62,6 @@ class SiPrefix(object):
             symbol = self.symbol + unit.symbol
             name = self.prefix + unit.name
             factor = self.factor
-            # TODO - check for existing BaseUnit with same name, symbol, and factor
             new_base_unit = BaseUnit(unit.dimension, name, symbol)
             new_base_unit.define_conversion_factor_to(unit, factor)
             return new_base_unit
@@ -73,7 +70,6 @@ class SiPrefix(object):
             symbol = self.symbol + unit.symbol
             name = self.prefix + unit.name
             factor = self.factor * unit.factor
-            # TODO - check for existing BaseUnit with same name, symbol, and factor
             return ScaledUnit(factor, unit.master, name, symbol)
         elif isinstance(unit, Unit):
             base_units = list(unit.iter_base_or_scaled_units())

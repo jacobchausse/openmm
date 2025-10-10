@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2021 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -48,7 +46,7 @@ using namespace std;
 
 static OpenCLPlatform platform;
 
-class SortTrait : public OpenCLSort::SortTrait {
+class SortTrait : public ComputeSortImpl::SortTrait {
     int getDataSize() const {return 4;}
     int getKeySize() const {return 4;}
     const char* getDataType() const {return "float";}
@@ -64,7 +62,7 @@ void verifySorting(vector<float> array, bool uniform) {
 
     System system;
     system.addParticle(0.0);
-    OpenCLPlatform::PlatformData platformData(system, "", "", platform.getPropertyDefaultValue("OpenCLPrecision"), "false", "false", 1, NULL);
+    OpenCLPlatform::PlatformData platformData(system, NULL, "", "", platform.getPropertyDefaultValue("OpenCLPrecision"), "false", "false", 1, NULL);
     OpenCLContext& context = *platformData.contexts[0];
     context.initialize();
     OpenCLArray data(context, array.size(), sizeof(float), "sortData");

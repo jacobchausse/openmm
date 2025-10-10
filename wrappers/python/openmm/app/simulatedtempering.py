@@ -3,10 +3,8 @@ from __future__ import print_function
 """
 simulatedtempering.py: Implements simulated tempering
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2015 Stanford University and the Authors.
 Authors: Peter Eastman
@@ -176,7 +174,10 @@ class SimulatedTempering(object):
                 steps2 = st.reportInterval - simulation.currentStep%st.reportInterval
                 steps = min(steps1, steps2)
                 isUpdateAttempt = (steps1 == steps)
-                return (steps, False, isUpdateAttempt, False, isUpdateAttempt)
+                if isUpdateAttempt:
+                    return {'steps': steps, 'periodic':None, 'include':['velocities', 'energy']}
+                else:
+                    return {'steps': steps, 'periodic':None, 'include':[]}
 
             def report(self, simulation, state):
                 st = self.st

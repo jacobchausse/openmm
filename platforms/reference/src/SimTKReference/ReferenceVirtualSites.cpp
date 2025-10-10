@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2012-2017 Stanford University and the Authors.      *
+ * Portions copyright (c) 2012-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -30,6 +28,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "ReferenceVirtualSites.h"
+#include "ReferenceForce.h"
 #include "openmm/VirtualSite.h"
 #include "openmm/OpenMMException.h"
 #include <cmath>
@@ -47,6 +46,7 @@ ReferenceVirtualSites::ReferenceVirtualSites(const System& system) {
     while (sites.size() > 0) {
         if (sites.size() == remainingSites)
             throw OpenMMException("Virtual site definitions are circular");
+        remainingSites = sites.size();
         for (auto index = sites.begin(); index != sites.end();) {
             const VirtualSite& site = system.getVirtualSite(*index);
             bool canCompute = true;
@@ -63,7 +63,9 @@ ReferenceVirtualSites::ReferenceVirtualSites(const System& system) {
     }
 }
 
-void ReferenceVirtualSites::computePositions(const OpenMM::System& system, vector<OpenMM::Vec3>& atomCoordinates) const {
+void ReferenceVirtualSites::computePositions(const OpenMM::System& system, vector<OpenMM::Vec3>& atomCoordinates, const Vec3* boxVectors) const {
+    Vec3 recipBoxVectors[3];
+    ReferenceForce::invertBoxVectors(boxVectors, recipBoxVectors);
     for (int i : order) {
         if (dynamic_cast<const TwoParticleAverageSite*>(&system.getVirtualSite(i)) != NULL) {
             // A two particle average.
@@ -119,10 +121,32 @@ void ReferenceVirtualSites::computePositions(const OpenMM::System& system, vecto
             ydir = zdir.cross(xdir);
             atomCoordinates[i] = origin + xdir*localPosition[0] + ydir*localPosition[1] + zdir*localPosition[2];
         }
+        else if (dynamic_cast<const SymmetrySite*>(&system.getVirtualSite(i)) != NULL) {
+            // A symmetry site.
+
+            const SymmetrySite& site = dynamic_cast<const SymmetrySite&>(system.getVirtualSite(i));
+            Vec3 r = atomCoordinates[site.getParticle(0)];
+            Vec3 Rx, Ry, Rz;
+            site.getRotationMatrix(Rx, Ry, Rz);
+            Vec3 v = site.getOffsetVector();
+            bool useBoxVectors = site.getUseBoxVectors();
+            if (useBoxVectors)
+                r = Vec3(r[0]*recipBoxVectors[0][0] + r[1]*recipBoxVectors[1][0] + r[2]*recipBoxVectors[2][0],
+                         r[1]*recipBoxVectors[1][1] + r[2]*recipBoxVectors[2][1],
+                         r[2]*recipBoxVectors[2][2]);
+            Vec3 pos = Vec3(Rx.dot(r), Ry.dot(r), Rz.dot(r)) + v;
+            if (useBoxVectors)
+                pos = Vec3(pos[0]*boxVectors[0][0] + pos[1]*boxVectors[1][0] + pos[2]*boxVectors[2][0],
+                           pos[1]*boxVectors[1][1] + pos[2]*boxVectors[2][1],
+                           pos[2]*boxVectors[2][2]);
+            atomCoordinates[i] = pos;
+        }
     }
 }
 
-void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const vector<OpenMM::Vec3>& atomCoordinates, vector<OpenMM::Vec3>& forces) const {
+void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const vector<OpenMM::Vec3>& atomCoordinates, vector<OpenMM::Vec3>& forces, const Vec3* boxVectors) const {
+    Vec3 recipBoxVectors[3];
+    ReferenceForce::invertBoxVectors(boxVectors, recipBoxVectors);
     for (auto iter = order.rbegin(); iter != order.rend(); ++iter) {
         int i = *iter;
         Vec3 f = forces[i];
@@ -214,6 +238,26 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
                 forces[p][1] += fp3[0]*wxScaled[j]*( -dx[2]*dx[1]) + fp3[2]*(dz[2]*sy-t1) + fp3[1]*((-dx[1]*dy[2]+dz[0])*wxScaled[j] + dy[2]*sy + dx[1]*t3);
                 forces[p][2] += fp3[0]*wxScaled[j]*(1-dx[2]*dx[2]) + fp3[2]*(dz[2]*sz   ) + fp3[1]*((-dx[2]*dy[2]      )*wxScaled[j] + dy[2]*sz - dx[0]*t1 - dx[1]*t2) + f[2]*originWeights[j];
             }
-       }
+        }
+        else if (dynamic_cast<const SymmetrySite*>(&system.getVirtualSite(i)) != NULL) {
+            // A symmetry site.
+
+            const SymmetrySite& site = dynamic_cast<const SymmetrySite&>(system.getVirtualSite(i));
+            Vec3 Rx, Ry, Rz;
+            site.getRotationMatrix(Rx, Ry, Rz);
+            bool useBoxVectors = site.getUseBoxVectors();
+            if (useBoxVectors)
+                f = Vec3(f[0]*boxVectors[0][0] + f[1]*boxVectors[1][0] + f[2]*boxVectors[2][0],
+                         f[1]*boxVectors[1][1] + f[2]*boxVectors[2][1],
+                         f[2]*boxVectors[2][2]);
+            f = Vec3(Rx[0]*f[0] + Ry[0]*f[1] + Rz[0]*f[2],
+                     Rx[1]*f[0] + Ry[1]*f[1] + Rz[1]*f[2],
+                     Rx[2]*f[0] + Ry[2]*f[1] + Rz[2]*f[2]);
+            if (useBoxVectors)
+                f = Vec3(f[0]*recipBoxVectors[0][0] + f[1]*recipBoxVectors[1][0] + f[2]*recipBoxVectors[2][0],
+                         f[1]*recipBoxVectors[1][1] + f[2]*recipBoxVectors[2][1],
+                         f[2]*recipBoxVectors[2][2]);
+            forces[site.getParticle(0)] += f;
+        }
     }
 }

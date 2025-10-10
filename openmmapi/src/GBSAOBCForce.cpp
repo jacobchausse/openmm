@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2009 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -83,4 +81,8 @@ ForceImpl* GBSAOBCForce::createImpl() const {
 
 void GBSAOBCForce::updateParametersInContext(Context& context) {
     dynamic_cast<GBSAOBCForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context));
+}
+
+int GBSAOBCForce::getNumParticles() const {
+    return particles.size();
 }

@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2014 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -244,4 +242,36 @@ ForceImpl* CustomHbondForce::createImpl() const {
 
 void CustomHbondForce::updateParametersInContext(Context& context) {
     dynamic_cast<CustomHbondForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context));
+}
+
+int CustomHbondForce::getNumDonors() const {
+    return donors.size();
+}
+
+int CustomHbondForce::getNumAcceptors() const {
+    return acceptors.size();
+}
+
+int CustomHbondForce::getNumExclusions() const {
+    return exclusions.size();
+}
+
+int CustomHbondForce::getNumPerDonorParameters() const {
+    return donorParameters.size();
+}
+
+int CustomHbondForce::getNumPerAcceptorParameters() const {
+    return acceptorParameters.size();
+}
+
+int CustomHbondForce::getNumGlobalParameters() const {
+    return globalParameters.size();
+}
+
+int CustomHbondForce::getNumTabulatedFunctions() const {
+    return functions.size();
+}
+
+int CustomHbondForce::getNumFunctions() const {
+    return functions.size();
 }

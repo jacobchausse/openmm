@@ -4,10 +4,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2016 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -56,20 +54,25 @@ namespace OpenMM {
  * As an example, the following code creates a CustomBondForce that implements a harmonic potential:
  *
  * \verbatim embed:rst:leading-asterisk
- * .. code-block:: cpp
- *
- *    CustomBondForce* force = new CustomBondForce("0.5*k*(r-r0)^2");
- *
+ * <c++>
+ * CustomBondForce* force = new CustomBondForce("0.5*k*(r-r0)^2");
+ * </c++>
+ * <python>
+ * force = CustomBondForce("0.5*k*(r-r0)^2")
+ * </python>
  * \endverbatim
  *
  * This force depends on two parameters: the spring constant k and equilibrium distance r0.  The following code defines these parameters:
  *
  * \verbatim embed:rst:leading-asterisk
- * .. code-block:: cpp
- *
- *    force->addPerBondParameter("k");
- *    force->addPerBondParameter("r0");
- *
+ * <c++>
+ * force->addPerBondParameter("k");
+ * force->addPerBondParameter("r0");
+ * </c++>
+ * <python>
+ * force.addPerBondParameter("k")
+ * force.addPerBondParameter("r0")
+ * </python>
  * \endverbatim
  * 
  * This class also has the ability to compute derivatives of the potential energy with respect to global parameters.
@@ -94,28 +97,20 @@ public:
     /**
      * Get the number of bonds for which force field parameters have been defined.
      */
-    int getNumBonds() const {
-        return bonds.size();
-    }
+    int getNumBonds() const;
     /**
      * Get the number of per-bond parameters that the interaction depends on.
      */
-    int getNumPerBondParameters() const {
-        return parameters.size();
-    }
+    int getNumPerBondParameters() const;
     /**
      * Get the number of global parameters that the interaction depends on.
      */
-    int getNumGlobalParameters() const {
-        return globalParameters.size();
-    }
+    int getNumGlobalParameters() const;
     /**
      * Get the number of global parameters with respect to which the derivative of the energy
      * should be computed.
      */
-    int getNumEnergyParameterDerivatives() const {
-        return energyParameterDerivatives.size();
-    }
+    int getNumEnergyParameterDerivatives() const;
     /**
      * Get the algebraic expression that gives the interaction energy for each bond
      */
@@ -260,6 +255,7 @@ private:
     std::vector<BondInfo> bonds;
     std::vector<int> energyParameterDerivatives;
     bool usePeriodic;
+    mutable int numContexts, firstChangedBond, lastChangedBond;
 };
 
 /**

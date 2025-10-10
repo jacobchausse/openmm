@@ -1,10 +1,8 @@
 """
 grofile.py: Used for loading Gromacs GRO files.
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012-2016 Stanford University and the Authors.
 Authors: Lee-Ping Wang, Peter Eastman
@@ -59,7 +57,7 @@ def _isfloat(word):
     @return answer Boolean which specifies whether the string is any number
 
     """
-    return match('^[-+]?[0-9]*\.?[0-9]*([eEdD][-+]?[0-9]+)?$',word)
+    return match(r'^[-+]?[0-9]*\.?[0-9]*([eEdD][-+]?[0-9]+)?$',word)
 
 def _is_gro_coord(line):
     """ Determines whether a line contains GROMACS data or not

@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2008-2021 Stanford University and the Authors.      *
+ * Portions copyright (c) 2008-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -40,16 +38,11 @@
 #include <utility>
 
 using namespace OpenMM;
-using std::map;
-using std::pair;
-using std::set;
-using std::string;
-using std::stringstream;
-using std::vector;
+using namespace std;
 
 NonbondedForce::NonbondedForce() : nonbondedMethod(NoCutoff), cutoffDistance(1.0), switchingDistance(-1.0), rfDielectric(78.3),
         ewaldErrorTol(5e-4), alpha(0.0), dalpha(0.0), useSwitchingFunction(false), useDispersionCorrection(true), exceptionsUsePeriodic(false), recipForceGroup(-1),
-        includeDirectSpace(true), nx(0), ny(0), nz(0), dnx(0), dny(0), dnz(0) {
+        includeDirectSpace(true), nx(0), ny(0), nz(0), dnx(0), dny(0), dnz(0), numContexts(0) {
 }
 
 NonbondedForce::NonbondedMethod NonbondedForce::getNonbondedMethod() const {
@@ -155,7 +148,10 @@ void NonbondedForce::setParticleParameters(int index, double charge, double sigm
     particles[index].charge = charge;
     particles[index].sigma = sigma;
     particles[index].epsilon = epsilon;
-}
+    if (numContexts > 0) {
+        firstChangedParticle = min(index, firstChangedParticle);
+        lastChangedParticle = max(index, lastChangedParticle);
+    }}
 
 int NonbondedForce::addException(int particle1, int particle2, double chargeProd, double sigma, double epsilon, bool replace) {
     map<pair<int, int>, int>::iterator iter = exceptionMap.find(pair<int, int>(particle1, particle2));
@@ -198,9 +194,20 @@ void NonbondedForce::setExceptionParameters(int index, int particle1, int partic
     exceptions[index].chargeProd = chargeProd;
     exceptions[index].sigma = sigma;
     exceptions[index].epsilon = epsilon;
-}
+    if (numContexts > 0) {
+        firstChangedException = min(index, firstChangedException);
+        lastChangedException = max(index, lastChangedException);
+    }}
 
 ForceImpl* NonbondedForce::createImpl() const {
+    if (numContexts == 0) {
+        // Begin tracking changes to particles and exceptions.
+        firstChangedParticle = particles.size();
+        lastChangedParticle = -1;
+        firstChangedException = exceptions.size();
+        lastChangedException = -1;
+    }
+    numContexts++;
     return new NonbondedForceImpl(*this);
 }
 
@@ -353,7 +360,16 @@ void NonbondedForce::setIncludeDirectSpace(bool include) {
 }
 
 void NonbondedForce::updateParametersInContext(Context& context) {
-    dynamic_cast<NonbondedForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context));
+    dynamic_cast<NonbondedForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context),
+            firstChangedParticle, lastChangedParticle, firstChangedException, lastChangedException);
+    if (numContexts == 1) {
+        // We just updated the only existing context for this force, so we can reset
+        // the tracking of changed particles and exceptions.
+        firstChangedParticle = particles.size();
+        lastChangedParticle = -1;
+        firstChangedException = exceptions.size();
+        lastChangedException = -1;
+    }
 }
 
 bool NonbondedForce::getExceptionsUsePeriodicBoundaryConditions() const {
@@ -362,4 +378,24 @@ bool NonbondedForce::getExceptionsUsePeriodicBoundaryConditions() const {
 
 void NonbondedForce::setExceptionsUsePeriodicBoundaryConditions(bool periodic) {
     exceptionsUsePeriodic = periodic;
+}
+
+int NonbondedForce::getNumParticles() const {
+    return particles.size();
+}
+
+int NonbondedForce::getNumExceptions() const {
+    return exceptions.size();
+}
+
+int NonbondedForce::getNumGlobalParameters() const {
+    return globalParameters.size();
+}
+
+int NonbondedForce::getNumParticleParameterOffsets() const {
+    return particleOffsets.size();
+}
+
+int NonbondedForce::getNumExceptionParameterOffsets() const {
+    return exceptionOffsets.size();
 }

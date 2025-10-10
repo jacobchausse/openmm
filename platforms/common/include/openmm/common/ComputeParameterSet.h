@@ -4,10 +4,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2009-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -84,6 +82,17 @@ public:
      */
     template <class T>
     void setParameterValues(const std::vector<std::vector<T> >& values, bool convert=false);
+    /**
+     * Set the values of all parameters for a subset of objects.  They must be
+     * contained in a continuous range.
+     *
+     * @param first     the index of the first object for which to set parameter values
+     * @param values    values[i][j] contains the value of parameter j for object i+first
+     * @param convert   if true, automatic conversions between single and double
+     *                  precision will be performed as necessary
+     */
+    template <class T>
+    void setParameterValuesSubset(int first, const std::vector<std::vector<T> >& values, bool convert=false);
     /**
      * Get a vector of ComputeParameterInfo objects which describe the arrays
      * containing the data.

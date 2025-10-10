@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2013-2024 Stanford University and the Authors.      *
+ * Portions copyright (c) 2013-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -39,8 +37,11 @@ using namespace OpenMM;
 
 KernelImpl* CpuKernelFactory::createKernelImpl(std::string name, const Platform& platform, ContextImpl& context) const {
     CpuPlatform::PlatformData& data = CpuPlatform::getPlatformData(context);
+    ReferencePlatform::PlatformData& refdata = *static_cast<ReferencePlatform::PlatformData*>(context.getPlatformData());
     if (name == CalcForcesAndEnergyKernel::Name())
         return new CpuCalcForcesAndEnergyKernel(name, platform, data, context);
+    if (name == UpdateStateDataKernel::Name())
+        return new CpuUpdateStateDataKernel(name, platform, data, refdata);
     if (name == CalcHarmonicAngleForceKernel::Name())
         return new CpuCalcHarmonicAngleForceKernel(name, platform, data);
     if (name == CalcPeriodicTorsionForceKernel::Name())
@@ -49,6 +50,8 @@ KernelImpl* CpuKernelFactory::createKernelImpl(std::string name, const Platform&
         return new CpuCalcRBTorsionForceKernel(name, platform, data);
     if (name == CalcNonbondedForceKernel::Name())
         return new CpuCalcNonbondedForceKernel(name, platform, data);
+    if (name == CalcConstantPotentialForceKernel::Name())
+        return new CpuCalcConstantPotentialForceKernel(name, platform, data);
     if (name == CalcCustomNonbondedForceKernel::Name())
         return new CpuCalcCustomNonbondedForceKernel(name, platform, data);
     if (name == CalcCustomManyParticleForceKernel::Name())

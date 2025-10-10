@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2014 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -222,4 +220,28 @@ ForceImpl* CustomManyParticleForce::createImpl() const {
 
 void CustomManyParticleForce::updateParametersInContext(Context& context) {
     dynamic_cast<CustomManyParticleForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context));
+}
+
+int CustomManyParticleForce::getNumParticlesPerSet() const {
+    return particlesPerSet;
+}
+
+int CustomManyParticleForce::getNumParticles() const {
+    return particles.size();
+}
+
+int CustomManyParticleForce::getNumExclusions() const {
+    return exclusions.size();
+}
+
+int CustomManyParticleForce::getNumPerParticleParameters() const {
+    return particleParameters.size();
+}
+
+int CustomManyParticleForce::getNumGlobalParameters() const {
+    return globalParameters.size();
+}
+
+int CustomManyParticleForce::getNumTabulatedFunctions() const {
+    return functions.size();
 }

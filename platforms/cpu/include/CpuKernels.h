@@ -4,12 +4,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2013-2024 Stanford University and the Authors.      *
+ * Portions copyright (c) 2013-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -33,6 +31,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "CpuBondForce.h"
+#include "CpuConstantPotentialForce.h"
 #include "CpuCustomGBForce.h"
 #include "CpuCustomManyParticleForce.h"
 #include "CpuCustomNonbondedForce.h"
@@ -42,6 +41,7 @@
 #include "CpuNeighborList.h"
 #include "CpuNonbondedForce.h"
 #include "CpuPlatform.h"
+#include "ReferenceKernels.h"
 #include "openmm/kernels.h"
 #include "openmm/System.h"
 #include "openmm/internal/CustomNonbondedForceImpl.h"
@@ -96,6 +96,31 @@ private:
 };
 
 /**
+ * This kernel provides methods for setting and retrieving various state data: time, positions,
+ * velocities, and forces.
+ */
+class CpuUpdateStateDataKernel : public ReferenceUpdateStateDataKernel {
+public:
+    CpuUpdateStateDataKernel(std::string name, const Platform& platform, CpuPlatform::PlatformData& data, ReferencePlatform::PlatformData& refdata) :
+            ReferenceUpdateStateDataKernel(name, platform, refdata), data(data) {
+    }
+    /**
+     * Create a checkpoint recording the current state of the Context.
+     * 
+     * @param stream    an output stream the checkpoint data should be written to
+     */
+    void createCheckpoint(ContextImpl& context, std::ostream& stream);
+    /**
+     * Load a checkpoint that was written by createCheckpoint().
+     * 
+     * @param stream    an input stream the checkpoint data should be read from
+     */
+    void loadCheckpoint(ContextImpl& context, std::istream& stream);
+private:
+    CpuPlatform::PlatformData& data;
+};
+
+/**
  * This kernel is invoked by HarmonicAngleForce to calculate the forces acting on the system and the energy of the system.
  */
 class CpuCalcHarmonicAngleForceKernel : public CalcHarmonicAngleForceKernel {
@@ -122,10 +147,10 @@ public:
     /**
      * Copy changed parameters over to a context.
      *
-     * @param context    the context to copy parameters to
-     * @param force      the HarmonicAngleForce to copy the parameters from
+     * @param firstAngle the index of the first bond whose parameters might have changed
+     * @param lastAngle  the index of the last bond whose parameters might have changed
      */
-    void copyParametersToContext(ContextImpl& context, const HarmonicAngleForce& force);
+    void copyParametersToContext(ContextImpl& context, const HarmonicAngleForce& force, int firstAngle, int lastAngle);
 private:
     CpuPlatform::PlatformData& data;
     int numAngles;
@@ -162,10 +187,12 @@ public:
     /**
      * Copy changed parameters over to a context.
      *
-     * @param context    the context to copy parameters to
-     * @param force      the PeriodicTorsionForce to copy the parameters from
+     * @param context      the context to copy parameters to
+     * @param force        the PeriodicTorsionForce to copy the parameters from
+     * @param firstTorsion the index of the first torsion whose parameters might have changed
+     * @param lastTorsion  the index of the last torsion whose parameters might have changed
      */
-    void copyParametersToContext(ContextImpl& context, const PeriodicTorsionForce& force);
+    void copyParametersToContext(ContextImpl& context, const PeriodicTorsionForce& force, int firstTorsion, int lastTorsion);
 private:
     CpuPlatform::PlatformData& data;
     int numTorsions;
@@ -243,10 +270,14 @@ public:
     /**
      * Copy changed parameters over to a context.
      *
-     * @param context    the context to copy parameters to
-     * @param force      the NonbondedForce to copy the parameters from
+     * @param context        the context to copy parameters to
+     * @param force          the NonbondedForce to copy the parameters from
+     * @param firstParticle  the index of the first particle whose parameters might have changed
+     * @param lastParticle   the index of the last particle whose parameters might have changed
+     * @param firstException the index of the first exception whose parameters might have changed
+     * @param lastException  the index of the last exception whose parameters might have changed
      */
-    void copyParametersToContext(ContextImpl& context, const NonbondedForce& force);
+    void copyParametersToContext(ContextImpl& context, const NonbondedForce& force, int firstParticle, int lastParticle, int firstException, int lastException);
     /**
      * Get the parameters being used for PME.
      *
@@ -272,7 +303,8 @@ private:
     int numParticles, num14, chargePosqIndex, ljPosqIndex;
     std::vector<std::vector<int> > bonded14IndexArray;
     std::vector<std::vector<double> > bonded14ParamArray;
-    double nonbondedCutoff, switchingDistance, rfDielectric, ewaldAlpha, ewaldDispersionAlpha, ewaldSelfEnergy, dispersionCoefficient;
+    std::map<int, int> nb14Index;
+    double nonbondedCutoff, switchingDistance, rfDielectric, ewaldAlpha, ewaldDispersionAlpha, ewaldSelfEnergy, dispersionCoefficient, totalCharge;
     int kmax[3], gridSize[3], dispersionGridSize[3];
     bool useSwitchingFunction, exceptionsArePeriodic, useOptimizedPme, hasInitializedPme, hasInitializedDispersionPme, hasParticleOffsets, hasExceptionOffsets;
     std::vector<std::set<int> > exclusions;
@@ -288,6 +320,83 @@ private:
     Kernel optimizedPme, optimizedDispersionPme;
     CpuBondForce bondForce;
 };
+
+/**
+ * This kernel is invoked by ConstantPotentialForce to calculate the forces acting on the system.
+ */
+class CpuCalcConstantPotentialForceKernel : public CalcConstantPotentialForceKernel {
+public:
+    CpuCalcConstantPotentialForceKernel(std::string name, const Platform& platform, CpuPlatform::PlatformData& data);
+    ~CpuCalcConstantPotentialForceKernel();
+    /**
+     * Initialize the kernel.
+     *
+     * @param system     the System this kernel will be applied to
+     * @param force      the ConstantPotentialForce this kernel will be used for
+     */
+    void initialize(const System& system, const ConstantPotentialForce& force);
+    /**
+     * Execute the kernel to calculate the forces and/or energy.
+     *
+     * @param context        the context in which to execute this kernel
+     * @param includeForces  true if forces should be calculated
+     * @param includeEnergy  true if the energy should be calculated
+     * @return the potential energy due to the force
+     */
+    double execute(ContextImpl& context, bool includeForces, bool includeEnergy);
+    /**
+     * Copy changed parameters over to a context.
+     *
+     * @param context        the context to copy parameters to
+     * @param force          the ConstantPotentialForce to copy the parameters from
+     * @param firstParticle  the index of the first particle whose parameters might have changed
+     * @param lastParticle   the index of the last particle whose parameters might have changed
+     * @param firstException the index of the first exception whose parameters might have changed
+     * @param lastException  the index of the last exception whose parameters might have changed
+     * @param firstElectrode the index of the first electrode whose parameters might have changed
+     * @param lastElectrode  the index of the last electrode whose parameters might have changed
+     */
+    void copyParametersToContext(ContextImpl& context, const ConstantPotentialForce& force, int firstParticle, int lastParticle, int firstException, int lastException, int firstElectrode, int lastElectrode);
+    /**
+     * Get the parameters being used for PME.
+     *
+     * @param alpha   the separation parameter
+     * @param nx      the number of grid points along the X axis
+     * @param ny      the number of grid points along the Y axis
+     * @param nz      the number of grid points along the Z axis
+     */
+    void getPMEParameters(double& alpha, int& nx, int& ny, int& nz) const;
+    /**
+     * Get the charges on all particles.
+     *
+     * @param context       the context to copy parameters to
+     * @param[out] charges  a vector to populate with particle charges
+     */
+    void getCharges(ContextImpl& context, std::vector<double>& charges);
+private:
+    void checkBoxSize(const Vec3* boxVectors);
+    void ensurePmeInitialized(ContextImpl& context);
+private:
+    CpuPlatform::PlatformData& data;
+    int numParticles, num14, numElectrodeParticles, chargePosqIndex;
+    std::vector<double> setCharges;
+    std::vector<float> charges;
+    std::vector<std::vector<double> > bonded14ParamArray;
+    std::vector<std::vector<int> > bonded14IndexArray;
+    std::map<int, int> nb14Index;
+    std::vector<std::set<int> > exclusions;
+    std::vector<int> sysToElec, elecToSys, sysElec, elecElec;
+    std::vector<std::array<double, 3> > electrodeParams;
+    double nonbondedCutoff, ewaldAlpha, cgErrorTol, chargeTarget;
+    int gridSize[3];
+    bool exceptionsArePeriodic, hasInitializedPme, useChargeConstraint;
+    Vec3 externalField;
+    CpuConstantPotentialForce* constantPotential;
+    CpuConstantPotentialSolver* solver;
+    CpuBondForce bondForce;
+    Kernel pmeKernel;
+};
+
 
 /**
  * This kernel is invoked by CustomNonbondedForce to calculate the forces acting on the system.
@@ -317,8 +426,10 @@ public:
      *
      * @param context    the context to copy parameters to
      * @param force      the CustomNonbondedForce to copy the parameters from
+     * @param firstParticle  the index of the first particle whose parameters might have changed
+     * @param lastParticle   the index of the last particle whose parameters might have changed
      */
-    void copyParametersToContext(ContextImpl& context, const CustomNonbondedForce& force);
+    void copyParametersToContext(ContextImpl& context, const CustomNonbondedForce& force, int firstParticle, int lastParticle);
 private:
     void createInteraction(const CustomNonbondedForce& force);
     CpuPlatform::PlatformData& data;

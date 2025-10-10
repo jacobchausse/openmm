@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2012-2017 Stanford University and the Authors.      *
+ * Portions copyright (c) 2012-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -307,6 +305,170 @@ void testLocalCoordinates(int numSiteParticles) {
 }
 
 /**
+ * Test a SymmetrySite virtual site.
+ */
+void testSymmetry(bool useBoxVectors) {
+    System system;
+    system.setDefaultPeriodicBoxVectors(Vec3(5, 0, 0), Vec3(0, 10, 0), Vec3(0, 0, 15));
+    system.addParticle(1.0);
+    system.addParticle(0.0);
+    double ct = cos(1.1);
+    double st = sin(1.1);
+    Vec3 Rx(ct, -st, 0), Ry(st, ct, 0), Rz(0, 0, 1), v(1, 2, 3);
+    system.setVirtualSite(1, new SymmetrySite(0, Rx, Ry, Rz, v, useBoxVectors));
+    CustomExternalForce* forceField = new CustomExternalForce("2*x^2+3*y^2+4*z^2");
+    system.addForce(forceField);
+    forceField->addParticle(0);
+    forceField->addParticle(1);
+    LangevinIntegrator integrator(300.0, 0.1, 0.002);
+    Context context(system, integrator, platform);
+    vector<Vec3> positions(2);
+    positions[0] = Vec3(0.5, 1.2, -2.3);
+    context.setPositions(positions);
+    context.applyConstraints(0.0001);
+    for (int i = 0; i < 1000; i++) {
+        State state = context.getState(State::Positions | State::Forces);
+        const vector<Vec3>& pos = state.getPositions();
+        Vec3 expectedPos;
+        if (useBoxVectors) {
+            Vec3 p(pos[0][0]/5, pos[0][1]/10, pos[0][2]/15);
+            expectedPos = Vec3(Rx.dot(p), Ry.dot(p), Rz.dot(p))+v;
+            expectedPos = Vec3(5*expectedPos[0], 10*expectedPos[1], 15*expectedPos[2]);
+        }
+        else
+            expectedPos = Vec3(Rx.dot(pos[0]), Ry.dot(pos[0]), Rz.dot(pos[0]))+v;
+        ASSERT_EQUAL_VEC(expectedPos, pos[1], 1e-5);
+        Vec3 f1(-4*pos[0][0], -6*pos[0][1], -8*pos[0][2]);
+        Vec3 f2(-4*pos[1][0], -6*pos[1][1], -8*pos[1][2]);
+        if (useBoxVectors)
+            f2 = Vec3(f2[0]*5, f2[1]*10, f2[2]*15);
+        f2 = Vec3(Rx[0]*f2[0] + Ry[0]*f2[1] + Rz[0]*f2[2],
+                  Rx[1]*f2[0] + Ry[1]*f2[1] + Rz[1]*f2[2],
+                  Rx[2]*f2[0] + Ry[2]*f2[1] + Rz[2]*f2[2]);
+        if (useBoxVectors)
+            f2 = Vec3(f2[0]/5, f2[1]/10, f2[2]/15);
+        ASSERT_EQUAL_VEC(f1+f2, state.getForces()[0], 1e-4);
+        integrator.step(1);
+    }
+
+    // Test the force against a finite difference approximation.
+
+    context.setPositions(positions);
+    context.applyConstraints(0.0001);
+    State state = context.getState(State::Forces);
+    Vec3 f0 = state.getForces()[0];
+    double norm = std::sqrt(f0.dot(f0));
+    const double delta = 1e-2;
+    double step = 0.5*delta/norm;
+    vector<Vec3> positions2 = positions;
+    vector<Vec3> positions3 = positions;
+    positions2[0] -= f0*step;
+    positions3[0] += f0*step;
+    context.setPositions(positions2);
+    context.applyConstraints(0.0001);
+    State state2 = context.getState(State::Energy);
+    context.setPositions(positions3);
+    context.applyConstraints(0.0001);
+    State state3 = context.getState(State::Energy);
+    ASSERT_EQUAL_TOL(norm, (state2.getPotentialEnergy()-state3.getPotentialEnergy())/delta, 1e-3)
+}
+
+/**
+ * Test a SymmetrySite virtual site within a P21 space group and non-orthogonal unit cell axes.
+ */
+void testSymmetryP21NonOrthogonal() {
+    // Roy P21 (CCDC ID QAXMEH31)
+    Vec3 Rx(-1.0, 0, 0), Ry(0, 1, 0), Rz(0, 0, -1), v(0, 0.5, 0);
+    Vec3 a = Vec3(10.771, 0, 0);
+    Vec3 b = Vec3(0, 11.019, 0);
+    Vec3 c = Vec3(-5.320, 0, 10.117);
+    Vec3 boxVectors[3];
+    boxVectors[0] = a;
+    boxVectors[1] = b;
+    boxVectors[2] = c;
+    Vec3 recipBoxVectors[3];
+    double determinant = boxVectors[0][0]*boxVectors[1][1]*boxVectors[2][2];
+    double scale = 1.0/determinant;
+    recipBoxVectors[0] = Vec3(boxVectors[1][1]*boxVectors[2][2], 0, 0)*scale;
+    recipBoxVectors[1] = Vec3(-boxVectors[1][0]*boxVectors[2][2], boxVectors[0][0]*boxVectors[2][2], 0)*scale;
+    recipBoxVectors[2] = Vec3(boxVectors[1][0]*boxVectors[2][1]-boxVectors[1][1]*boxVectors[2][0], -boxVectors[0][0]*boxVectors[2][1], boxVectors[0][0]*boxVectors[1][1])*scale;
+    System system;
+    system.setDefaultPeriodicBoxVectors(a, b, c);
+    system.addParticle(1.0);
+    system.addParticle(0.0);
+    bool useBoxVectors = true;
+    system.setVirtualSite(1, new SymmetrySite(0, Rx, Ry, Rz, v, useBoxVectors));
+    CustomExternalForce* forceField = new CustomExternalForce("2*x^2+3*y^2+4*z^2");
+    system.addForce(forceField);
+    forceField->addParticle(0);
+    forceField->addParticle(1);
+    LangevinIntegrator integrator(300.0, 0.1, 0.002);
+    Context context(system, integrator, platform);
+    vector<Vec3> positions(2);
+
+    // Initial sulfur position:       1.92556489    4.05148760    1.84034785
+    // P21 SymOp symmetry location:  -1.92556489    9.56098760   -1.84034785
+    positions[0] = Vec3(1.92556489,4.05148760,1.84034785);
+    Vec3 p21 = Vec3(-1.92556489,9.56098760,-1.84034785);
+    context.setPositions(positions);
+    context.applyConstraints(0.0001);
+    for (int i = 0; i < 1000; i++) {
+        State state = context.getState(State::Positions | State::Forces);
+        const vector<Vec3> &pos = state.getPositions();
+        if (i == 0) {
+            ASSERT_EQUAL_VEC(p21, pos[1], 1e-5)
+        }
+        else {
+            Vec3 expectedPos;
+            Vec3 r = pos[0];
+            r = Vec3(r[0] * recipBoxVectors[0][0] + r[1] * recipBoxVectors[1][0] + r[2] * recipBoxVectors[2][0],
+                     r[1] * recipBoxVectors[1][1] + r[2] * recipBoxVectors[2][1],
+                     r[2] * recipBoxVectors[2][2]);
+            expectedPos = Vec3(Rx.dot(r), Ry.dot(r), Rz.dot(r)) + v;
+            expectedPos = Vec3(expectedPos[0] * boxVectors[0][0] + expectedPos[1] * boxVectors[1][0] +
+                               expectedPos[2] * boxVectors[2][0],
+                               expectedPos[1] * boxVectors[1][1] + expectedPos[2] * boxVectors[2][1],
+                               expectedPos[2] * boxVectors[2][2]);
+            ASSERT_EQUAL_VEC(expectedPos, pos[1], 1e-5)
+        }
+        Vec3 f1(-4*pos[0][0], -6*pos[0][1], -8*pos[0][2]);
+        Vec3 f2(-4*pos[1][0], -6*pos[1][1], -8*pos[1][2]);
+        f2 = Vec3(f2[0]*boxVectors[0][0] + f2[1]*boxVectors[1][0] + f2[2]*boxVectors[2][0],
+                  f2[1]*boxVectors[1][1] + f2[2]*boxVectors[2][1],
+                  f2[2]*boxVectors[2][2]);
+        f2 = Vec3(Rx[0]*f2[0] + Ry[0]*f2[1] + Rz[0]*f2[2],
+                  Rx[1]*f2[0] + Ry[1]*f2[1] + Rz[1]*f2[2],
+                  Rx[2]*f2[0] + Ry[2]*f2[1] + Rz[2]*f2[2]);
+        f2 = Vec3(f2[0]*recipBoxVectors[0][0] + f2[1]*recipBoxVectors[1][0] + f2[2]*recipBoxVectors[2][0],
+                  f2[1]*recipBoxVectors[1][1] + f2[2]*recipBoxVectors[2][1],
+                  f2[2]*recipBoxVectors[2][2]);
+        ASSERT_EQUAL_VEC(f1+f2, state.getForces()[0], 1e-4)
+        integrator.step(1);
+    }
+
+    // Test the force against a finite difference approximation.
+
+    context.setPositions(positions);
+    context.applyConstraints(0.0001);
+    State state = context.getState(State::Forces);
+    Vec3 f0 = state.getForces()[0];
+    double norm = std::sqrt(f0.dot(f0));
+    const double delta = 1e-2;
+    double step = 0.5*delta/norm;
+    vector<Vec3> positions2 = positions;
+    vector<Vec3> positions3 = positions;
+    positions2[0] -= f0*step;
+    positions3[0] += f0*step;
+    context.setPositions(positions2);
+    context.applyConstraints(0.0001);
+    State state2 = context.getState(State::Energy);
+    context.setPositions(positions3);
+    context.applyConstraints(0.0001);
+    State state3 = context.getState(State::Energy);
+    ASSERT_EQUAL_TOL(norm, (state2.getPotentialEnergy()-state3.getPotentialEnergy())/delta, 1e-3)
+}
+
+/**
  * Make sure that energy, linear momentum, and angular momentum are all conserved
  * when using virtual sites.
  */
@@ -512,6 +674,112 @@ void testNestedSites() {
     ASSERT_EQUAL_VEC(Vec3(1*0.25 + 2*0.75, 0, 0), state.getForces()[4], 1e-6);
 }
 
+/**
+ * Make sure that atom reordering respects virtual sites.
+ */
+void testReordering() {
+    const double cutoff = 2.0;
+    const double boxSize = 20.0;
+    System system;
+    NonbondedForce* nonbonded = new NonbondedForce();
+    system.addForce(nonbonded);
+    nonbonded->setNonbondedMethod(NonbondedForce::CutoffNonPeriodic);
+    nonbonded->setCutoffDistance(cutoff);
+    vector<Vec3> positions;
+    OpenMM_SFMT::SFMT sfmt;
+    init_gen_rand(0, sfmt);
+    
+    // Create linear molecules with TwoParticleAverage virtual sites.
+    
+    for (int i = 0; i < 50; i++) {
+        int start = system.getNumParticles();
+        system.addParticle(1.0);
+        system.addParticle(1.0);
+        system.addParticle(0.0);
+        system.setVirtualSite(start+2, new TwoParticleAverageSite(start, start+1, 0.4, 0.6));
+        system.addConstraint(start, start+1, 2.0);
+        for (int i = 0; i < 3; i++) {
+            nonbonded->addParticle(0, 0.2, 1);
+            for (int j = 0; j < i; j++)
+                nonbonded->addException(start+i, start+j, 0, 1, 0);
+        }
+        Vec3 pos(boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt));
+        positions.push_back(pos);
+        positions.push_back(pos+Vec3(2, 0, 0));
+        positions.push_back(Vec3());
+    }
+    
+    // Create planar molecules with ThreeParticleAverage virtual sites.
+    
+    for (int i = 0; i < 50; i++) {
+        int start = system.getNumParticles();
+        system.addParticle(1.0);
+        system.addParticle(1.0);
+        system.addParticle(1.0);
+        system.addParticle(0.0);
+        system.setVirtualSite(start+3, new ThreeParticleAverageSite(start, start+1, start+2, 0.3, 0.5, 0.2));
+        system.addConstraint(start, start+1, 1.0);
+        system.addConstraint(start, start+2, 1.0);
+        system.addConstraint(start+1, start+2, sqrt(2.0));
+        for (int i = 0; i < 4; i++) {
+            nonbonded->addParticle(0, 0.2, 1);
+            for (int j = 0; j < i; j++)
+                nonbonded->addException(start+i, start+j, 0, 1, 0);
+        }
+        Vec3 pos(boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt));
+        positions.push_back(pos);
+        positions.push_back(pos+Vec3(1, 0, 0));
+        positions.push_back(pos+Vec3(0, 1, 0));
+        positions.push_back(Vec3());
+    }
+    
+    // Create tetrahedral molecules with OutOfPlane virtual sites.
+    
+    for (int i = 0; i < 50; i++) {
+        int start = system.getNumParticles();
+        system.addParticle(1.0);
+        system.addParticle(1.0);
+        system.addParticle(1.0);
+        system.addParticle(0.0);
+        system.setVirtualSite(start+3, new OutOfPlaneSite(start, start+1, start+2, 0.3, 0.5, 0.2));
+        system.addConstraint(start, start+1, 1.0);
+        system.addConstraint(start, start+2, 1.0);
+        system.addConstraint(start+1, start+2, sqrt(2.0));
+        for (int i = 0; i < 4; i++) {
+            nonbonded->addParticle(0, 0.2, 1);
+            for (int j = 0; j < i; j++)
+                nonbonded->addException(start+i, start+j, 0, 1, 0);
+        }
+        Vec3 pos(boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt), boxSize*genrand_real2(sfmt));
+        positions.push_back(pos);
+        positions.push_back(pos+Vec3(1, 0, 0));
+        positions.push_back(pos+Vec3(0, 1, 0));
+        positions.push_back(Vec3());
+    }
+
+    // Simulate it and check conservation laws.
+    
+    LangevinIntegrator integrator(300.0, 0.1, 0.002);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+    context.applyConstraints(0.0001);
+    for (int i = 0; i < 1000; i++) {
+        State state = context.getState(State::Positions);
+        const vector<Vec3>& pos = state.getPositions();
+        for (int j = 0; j < 150; j += 3)
+            ASSERT_EQUAL_VEC(pos[j]*0.4+pos[j+1]*0.6, pos[j+2], 1e-5);
+        for (int j = 150; j < 350; j += 4)
+            ASSERT_EQUAL_VEC(pos[j]*0.3+pos[j+1]*0.5+pos[j+2]*0.2, pos[j+3], 1e-5);
+        for (int j = 350; j < 550; j += 4) {
+            Vec3 v12 = pos[j+1]-pos[j];
+            Vec3 v13 = pos[j+2]-pos[j];
+            Vec3 cross = v12.cross(v13);
+            ASSERT_EQUAL_VEC(pos[j]+v12*0.3+v13*0.5+cross*0.2, pos[j+3], 1e-5);
+        }
+        integrator.step(1);
+    }
+}
+
 void runPlatformTests();
 
 int main(int argc, char* argv[]) {
@@ -524,9 +792,13 @@ int main(int argc, char* argv[]) {
         testLocalCoordinates(2);
         testLocalCoordinates(3);
         testLocalCoordinates(4);
+        testSymmetry(false);
+        testSymmetry(true);
         testConservationLaws();
         testOverlappingSites();
         testNestedSites();
+        testReordering();
+        testSymmetryP21NonOrthogonal();
         runPlatformTests();
     }
     catch(const exception& e) {

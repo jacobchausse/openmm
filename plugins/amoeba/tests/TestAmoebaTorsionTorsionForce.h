@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMMAmoeba                             *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2021 Stanford University and the Authors.      *
  * Authors: Mark Friedrichs                                                   *
@@ -2616,7 +2614,8 @@ void testTorsionTorsion(int systemId) {
 
         expectedEnergy        = -2.699654759E+00;
 
-    } else if (systemId == 1) {
+    }
+    else if (systemId == 1) {
 
         // villin: 158    176    177    178    183     -1      0
         chiralCheckAtomIndex  = -1;

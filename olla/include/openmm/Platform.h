@@ -4,10 +4,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -53,10 +51,12 @@ class KernelFactory;
  * To get a Platform object, call
  *
  * \verbatim embed:rst:leading-asterisk
- * .. code-block:: cpp
- *
- *    Platform& platform = Platform::findPlatform(kernelNames);
- *
+ * <c++>
+ * Platform& platform = Platform::findPlatform(kernelNames);
+ * </c++>
+ * <python>
+ * platform = Platform.findPlatform(kernelNames)
+ * </python>
  * \endverbatim
  *
  * passing in the names of all kernels that will be required for the calculation you plan to perform.  It

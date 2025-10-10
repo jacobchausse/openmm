@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2012-2017 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -183,4 +181,30 @@ Vec3 LocalCoordinatesSite::getYWeights() const {
 
 const Vec3& LocalCoordinatesSite::getLocalPosition() const {
     return localPosition;
+}
+
+SymmetrySite::SymmetrySite(int particle, const Vec3& Rx, const Vec3& Ry, const Vec3& Rz, const Vec3& v, bool useBoxVectors) :
+        Rx(Rx), Ry(Ry), Rz(Rz), v(v), useBoxVectors(useBoxVectors) {
+    setParticles({particle});
+    Vec3 R[] = {Rx, Ry, Rz};
+    for (int i = 0; i < 3; i++)
+        for (int j = i; j < 3; j++) {
+            double dot = R[i].dot(R[j]);
+            if ((i == j && fabs(dot-1) > 1e-6) || (i != j && fabs(dot) > 1e-6))
+                throw OpenMMException("SymmetrySite: The rotation matrix must be orthogonal");
+        }
+}
+
+void SymmetrySite::getRotationMatrix(Vec3& Rx, Vec3& Ry, Vec3& Rz) const {
+    Rx = this->Rx;
+    Ry = this->Ry;
+    Rz = this->Rz;
+}
+
+const Vec3& SymmetrySite::getOffsetVector() const {
+    return v;
+}
+
+bool SymmetrySite::getUseBoxVectors() const {
+    return useBoxVectors;
 }

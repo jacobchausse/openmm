@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2010 Stanford University and the Authors.           *
+ * Portions copyright (c) 2010-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman, Yutong Zhao                                        *
  * Contributors:                                                              *
  *                                                                            *
@@ -47,6 +45,7 @@ void BrownianIntegratorProxy::serialize(const void* object, SerializationNode& n
     node.setDoubleProperty("temperature", integrator.getTemperature());
     node.setDoubleProperty("friction", integrator.getFriction());
     node.setIntProperty("randomSeed", integrator.getRandomNumberSeed());
+    node.setIntProperty("integrationForceGroups", integrator.getIntegrationForceGroups());
 }
 
 void* BrownianIntegratorProxy::deserialize(const SerializationNode& node) const {
@@ -57,5 +56,6 @@ void* BrownianIntegratorProxy::deserialize(const SerializationNode& node) const 
                                                             node.getDoubleProperty("stepSize"));
     integrator->setConstraintTolerance(node.getDoubleProperty("constraintTolerance"));
     integrator->setRandomNumberSeed(node.getIntProperty("randomSeed"));
+    integrator->setIntegrationForceGroups(node.getIntProperty("integrationForceGroups", 0xFFFFFFFF));
     return integrator;
 }

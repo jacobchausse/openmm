@@ -321,6 +321,8 @@ systems and parameter values, but no guarantees are made.  It is important to
 validate your own simulations, and identify parameter values that produce
 acceptable accuracy for each system.
 
+.. _coulomb-interaction-pme:
+
 Coulomb Interaction With Particle Mesh Ewald
 ============================================
 
@@ -460,6 +462,122 @@ where :math:`r_i` is the atomic radius of particle *i*\ , :math:`r_i` is
 its atomic radius, and :math:`r_\mathit{solvent}` is the solvent radius, which is taken
 to be 0.14 nm.  The default value for the energy scale :math:`E_{SA}` is 2.25936 kJ/mol/nm\ :sup:`2`\ .
 
+ConstantPotentialForce
+**********************
+
+This force is an implementation of the periodic finite field constant potential
+method :cite:`Dufils2019`.  The constant potential method implements Coulomb
+interactions between particles using the particle mesh Ewald method as described
+in section :numref:`coulomb-interaction-pme`.  Unlike Coulomb interactions
+implemented by a NonbondedForce that use fixed charges, the constant potential
+method allows certain particles in a system to be designated electrode particles
+whose charges can fluctuate.  Additionally, instead of point charges, these
+electrode particles have Gaussian charge densities, are held at given electric
+potentials, and can optionally employ a simple Thomas-Fermi metallicity model
+:cite:`Scalfi2020`.  Finally, an electric field can be applied to all charged
+particles in the system.  For a given configuration of all particles, the
+charges on electrode particles are set to minimize the total electrostatic
+energy, given by
+
+.. math::
+   E=E_{PME}+E_{gauss}+E_{self}+E_{field}+E_{potential}+E_{TF}
+
+Here :math:`E_{PME}` is the interaction of point particles computed by the
+particle mesh Ewald method.  Now
+
+.. math::
+   E_{gauss}=-\frac{1}{2}\sum_{i,j}q_iq_i\frac{\text{erfc}\left(\eta_{ij}r_{ij}\right)}{r_{ij}}
+
+with :math:`\eta_{ij}=1/\sqrt{w_i^2+w_j^2}`, where :math:`w_i=0` for a
+non-electrode (point) particle and :math:`w_i>0` for an electrode particle.  No
+term is included in the sum when :math:`i=j` or :math:`w_i=w_j=0`.  Note that in
+OpenMM's implementation, specification of an electrode requires the Gaussian
+width :math:`w_i`, while the reciprocal width :math:`\eta_i=1/w_i` is often used
+in the literature.  In addition to this correction to interactions between
+particles, the presence of Gaussian charge densities on electrode particles
+contributes a self-interaction energy:
+
+.. math::
+   E_{self}=\frac{1}{\sqrt{2\pi}}\sum_{i\in\text{elec}}\frac{q_i^2}{w_i}
+
+Next, for the electric field :math:`\mathbf{E}` (on all particles) and applied
+potential (:math:`\Psi_i` on electrode particles :math:`i`),
+
+.. math::
+   E_{field}=-\sum_{i}q_i\mathbf{r}_i\cdot\mathbf{E}
+
+.. math::
+   E_{potential}=-\sum_{i\in\text{elec}}q_i\Psi_i
+
+Finally, for the Thomas-Fermi contribution on the electrode particles,
+
+.. math::
+   E_{TF}=2\pi\sum_{i\in\text{elec}}q_i^2\left(\frac{\ell_{TF,i}^2}{v_{TF,i}}\right)
+
+where :math:`\ell_{TF,i}` is the Thomas-Fermi length and :math:`v_{TF,i}` is a
+characteristic volume scale (often referred to as a "Voronoi volume" in other
+implementations).  In OpenMM's implementation, the parameter
+:math:`\ell_{TF,i}^2/v_{TF,i}` is specified as a single Thomas-Fermi parameter,
+with units of reciprocal length, for all particles in an electrode.
+
+Besides these additional terms, and the fluctuating nature of the electrode
+particle charges, there are a few other important differences between the
+implementation of nonbonded interactions in ConstantPotentialForce and that in
+NonbondedForce using PME:
+
+1. ConstantPotentialForce does not include any capability for computing
+   Lennard-Jones interactions.  If Lennard-Jones interactions (as NonbondedForce
+   computes them) are desired, a separate NonbondedForce should be added to the
+   system with the appropriate sigma and epsilon parameters set, and with all
+   charges set to zero.
+
+2. For the solved charges on electrode particles to be valid, all particles in
+   the system must use a single ConstantPotentialForce.  Setting charges in more
+   than one ConstantPotentialForce, or setting any non-zero charges in a
+   NonbondedForce, will produce invalid results, as solving for the electrode
+   charges requires a global minimization of the system's electrostatic energy.
+
+3. The Gaussian charge correction to pairwise interactions given by
+   :math:`E_{gauss}` above is calculated using the minimum image convention and
+   truncated with a fixed cutoff :math:`r_{cut}`.  If decreasing :math:`r_{cut}`
+   to tune PME performance, ensure it stays large enough with respect to the
+   largest Gaussian width :math:`w_i` in the system.  Using the formula for the
+   direct space error in section :numref:`coulomb-interaction-pme` with
+   :math:`1/w_i` in place of :math:`\alpha` (owing to the similarities in the
+   functional forms of these terms), :math:`r_{cut}\ge2.7w_{max}` should be
+   sufficient for the default error tolerance :math:`\delta=5\times10^{-4}`.
+
+ConstantPotentialForce provides two algorithms to solve for electrode charges.
+The matrix solver precomputes a capacitance matrix for the system before a
+simulation and solves directly for charges, while the conjugate gradient (CG)
+solver finds charges iteratively without requiring a matrix inversion.  The
+matrix solver may be faster if the number of electrode particles is small
+enough, although it cannot be used unless the electrode particles are fixed in
+place during a simulation by setting their masses to zero.  Unless the positions
+of electrode particles are allowed to fluctuate (in which case only the CG
+solver can be used), both solvers can be benchmarked on a given problem to find
+the one with the best performance.
+
+By default, the CG solver uses a preconditioner that automatically activates if
+any electrodes use Gaussian widths or Thomas-Fermi parameters different from
+each other.  This will usually allow the solver to converge to a given tolerance
+in fewer iterations.  However, if these electrode parameters differ but are very
+close to each other, benefit from the preconditioner may be offset by additional
+numerical error introduced due to floating-point roundoff.  This should not
+affect the results, but may cause the CG solver to require more iterations to
+converge.  Disabling the preconditioner may improve performance in such a case.
+
+Because ConstantPotentialForce needs to compute all of the electrostatic
+interactions in a system, it should not be used with AmoebaMultipoleForce, and
+is thus incompatible with induced dipole-based polarizable force fields.
+However, ConstantPotentialForce can be used with Drude polarizable force fields.
+None of the Drude sites or their parent particles should belong to an electrode.
+Also, DrudeSCFIntegrator should not be used with ConstantPotentialForce to
+integrate a system with Drude particles, because the current implementations
+do not permit simultaneously solving for the charges on electrode particles and
+the positions of the Drude particles.  Constant potential simulations with Drude
+polarizable force fields for the electrolyte should use DrudeLangevinIntegrator
+or DrudeNoseHooverIntegrator instead.
 
 GayBerneForce
 *************
@@ -630,6 +748,25 @@ probability.  It does not itself perform temperature regulation, however.  You
 must use another mechanism along with it to maintain the temperature, such as
 LangevinIntegrator or AndersenThermostat.
 
+Another feature of MonteCarloBarostat is that it can compute the "instantaneous
+pressure", which is defined based on the molecular virial:
+
+.. math::
+   P_{inst} = \frac{1}{3V} (\sum_i m_i |\mathbf{v}_i|^2 ) - \frac{dE}{dV}
+
+where the sum is taken over molecules, :math:`m_i` is the mass of the i'th molecule,
+and :math:`\mathbf{v}_i` is the velocity of its center of mass.  The derivative
+of potential energy with respect to volume is approximated with a finite difference.
+
+In most cases, the time average of the instantaneous pressure should equal the
+pressure applied by the barostat.  Fluctuations around the average can be extremely
+large, however, especially when simulating incompressible materials like water.
+A very long simulation may be required to accurately compute the average.  There
+also are situations where the average instantaneous pressure differs from the
+applied pressure.  For example, if the system contains immobile massless particles,
+they will reduce the kinetic energy below what would be expected based on the
+temperature, and hence reduce the calculated pressure.
+
 MonteCarloAnisotropicBarostat
 *****************************
 
@@ -643,6 +780,18 @@ each axis.
 You can specify that the barostat should only be applied to certain axes of the
 box, keeping the other axes fixed.  This is useful, for example, when doing
 constant surface area simulations of membranes.
+
+Like MonteCarloBarostat, the anisotropic barostat can compute an instantaneous
+pressure, but in this case the pressure is computed separately along each axis
+according to the formula
+
+.. math::
+   P_{inst} = \frac{1}{V} \sum_i m_i v_i^2 - \frac{dE}{dV}
+
+where :math:`v_i` is the component of the i'th molecule's velocity along the
+specified axis.  The derivative :math:`dE/dV` is again computed with a finite
+difference, but in this case :math:`dE` refers to the change in potential energy
+when scaling the box size along only a single axis.
 
 MonteCarloMembraneBarostat
 **************************
@@ -677,6 +826,10 @@ behavior of the periodic box:
   * inversely varying with the X and Y axes (so the total box volume does not
     change)
 
+Like other barostats, MonteCarloMembraneBarostat can compute the instantaneous
+pressure.  It is computed separately for each axis using the same formula as
+MonteCarloAnisotropicBarostat.
+
 MonteCarloFlexibleBarostat
 **************************
 
@@ -686,6 +839,39 @@ steps can change not just the lengths of the box sides, but also the angles.  It
 is especially useful for simulations of bulk materials where the shape of a
 crystal's unit cell may not be known in advance, or could even change with time
 as it transitions between phases.
+
+Computing the instantaneous pressure with MonteCarloFlexibleBarostat is more
+complicated than other barostats.  Because the box angles can change, it needs
+to compute the full pressure tensor.  Let :math:`\mathbf{a}`, :math:`\mathbf{b}`,
+and :math:`\mathbf{c}` be the vectors defining the periodic box.  They can be
+assembled into a 3 by 3 box matrix
+
+.. math::
+
+    h = \left[ {\begin{array}{ccc}
+        a_x & a_y & a_z \\
+        b_x & b_y & b_z \\
+        c_x & c_y & c_z \\
+      \end{array} } \right]
+
+The pressure tensor is similarly represented by a 3 by 3 matrix.  Its elements
+are given by
+
+.. math::
+
+   P_{jk} = \frac{1}{V} \left( \sum_i m_i v_{ij} v_{ik} - \frac{\partial E}{\partial h_{jk}} h_{jk} \right)
+
+Because of the particular reduced form OpenMM uses for the box vectors (see Section
+:numref:`periodic-boundary-conditions`), the elements above the diagonal are
+always zero.  In addition, the elements below the diagonal do not involve any
+change to the box volume, and therefore are not affected by the applied pressure.
+The six non-zero elements are as follows.
+
+* The diagonal elements reflect the pressure acting to change the box size along
+  each axis.  In equilibrium they should average to the applied pressure, although
+  fluctuations around the average can be very large.
+* The elements below the diagonal reflect the pressure acting to change the box
+  angles.  In equilibrium they should average to zero.
 
 CMMotionRemover
 ***************
@@ -722,3 +908,42 @@ This force is normally used with a CustomCVForce (see Section :numref:`customcvf
 One rarely wants a force whose energy exactly equals the RMSD, but there are many
 situations where it is useful to have a restraining or biasing force that depends
 on the RMSD in some way.
+
+OrientationRestraintForce
+*************************
+
+OrientationRestraintForce is used to keep a group of particles in a fixed
+orientation.  The calculation is closely related to the one in RMSD force.  Both
+forces begin by finding the translation and rotation that optimally superimpose
+the current particle positions on a set of reference positions.  Whereas
+RMSDForce computes the deviation after removing the translation and rotation,
+OrientationRestraintForce applies a force based on the rotation itself:
+
+.. math::
+   E = 2 k \mathrm{sin}^2(\theta/2)
+
+where :math:`k` is the force constant and :math:`\theta` is the rotation angle.
+
+For small rotations, :math:`E \approx \frac{k}{2}\theta^2`, giving a harmonic
+restraint.  For large rotations, the restraint is weaker than harmonic, and the
+force vanishes at :math:`\theta = \frac{\pi}{2}`.  This ensures that the force
+is continuous everywhere; a simple harmonic restraint would have a discontinuous
+force at :math:`\frac{\pi}{2}`.
+
+RGForce
+*********
+
+RGForce computes the radius of gyration (Rg) of a set of particle positions:
+
+.. math::
+   \text{Rg} = \sqrt{\frac{\sum_{i} \| \mathbf{x}_i - \mathbf{x}_c \|^2}{N}}
+
+where :math:`\mathbf{x}_c` is the center position,
+
+.. math::
+   \mathbf{x}_c = \frac{\sum_{i} \mathbf{x}_i}{N}
+
+This force is normally used with a CustomCVForce (see Section :numref:`customcvforce`).
+One rarely wants a force whose energy exactly equals Rg, but there are many
+situations where it is useful to have a restraining or biasing force that depends
+on Rg in some way.

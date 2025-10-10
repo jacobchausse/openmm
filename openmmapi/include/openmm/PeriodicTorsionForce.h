@@ -4,12 +4,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2008-2016 Stanford University and the Authors.      *
+ * Portions copyright (c) 2008-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -56,9 +54,7 @@ public:
     /**
      * Get the number of periodic torsion terms in the potential function
      */
-    int getNumTorsions() const {
-        return periodicTorsions.size();
-    }
+    int getNumTorsions() const;
     /**
      * Add a periodic torsion term to the force field.
      *
@@ -126,6 +122,7 @@ private:
     class PeriodicTorsionInfo;
     std::vector<PeriodicTorsionInfo> periodicTorsions;
     bool usePeriodic;
+    mutable int numContexts, firstChangedTorsion, lastChangedTorsion;
 };
 
 /**

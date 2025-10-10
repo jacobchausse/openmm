@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2012-2022 Stanford University and the Authors.      *
+ * Portions copyright (c) 2012-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -26,6 +24,7 @@
 
 #include "OpenCLArray.h"
 #include "OpenCLContext.h"
+#include "OpenCLQueue.h"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -96,13 +95,17 @@ ComputeContext& OpenCLArray::getContext() {
     return *context;
 }
 
+cl::CommandQueue OpenCLArray::getQueue() const {
+    return dynamic_cast<OpenCLQueue*>(context->getCurrentQueue().get())->getQueue();
+}
+
 void OpenCLArray::uploadSubArray(const void* data, int offset, int elements, bool blocking) {
     if (buffer == NULL)
         throw OpenMMException("OpenCLArray has not been initialized");
     if (offset < 0 || offset+elements > getSize())
         throw OpenMMException("uploadSubArray: data exceeds range of array");
     try {
-        context->getQueue().enqueueWriteBuffer(*buffer, blocking ? CL_TRUE : CL_FALSE, offset*elementSize, elements*elementSize, data);
+        getQueue().enqueueWriteBuffer(*buffer, blocking ? CL_TRUE : CL_FALSE, offset*elementSize, elements*elementSize, data);
     }
     catch (cl::Error err) {
         std::stringstream str;
@@ -115,7 +118,7 @@ void OpenCLArray::download(void* data, bool blocking) const {
     if (buffer == NULL)
         throw OpenMMException("OpenCLArray has not been initialized");
     try {
-        context->getQueue().enqueueReadBuffer(*buffer, blocking ? CL_TRUE : CL_FALSE, 0, size*elementSize, data);
+        getQueue().enqueueReadBuffer(*buffer, blocking ? CL_TRUE : CL_FALSE, 0, size*elementSize, data);
     }
     catch (cl::Error err) {
         std::stringstream str;
@@ -131,7 +134,7 @@ void OpenCLArray::copyTo(ArrayInterface& dest) const {
         throw OpenMMException("Error copying array "+name+" to "+dest.getName()+": The destination array does not match the size of the array");
     OpenCLArray& clDest = context->unwrap(dest);
     try {
-        context->getQueue().enqueueCopyBuffer(*buffer, clDest.getDeviceBuffer(), 0, 0, size*elementSize);
+        getQueue().enqueueCopyBuffer(*buffer, clDest.getDeviceBuffer(), 0, 0, size*elementSize);
     }
     catch (cl::Error err) {
         std::stringstream str;

@@ -1,10 +1,8 @@
 """
 pdbfile.py: Used for loading PDB files.
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012-2023 Stanford University and the Authors.
 Authors: Peter Eastman
@@ -152,7 +150,7 @@ class PDBFile(object):
                                 element = elem.get_by_symbol(upper[0])
                             except KeyError:
                                 pass
-                    newAtom = top.addAtom(atomName, element, r, str(atom.serial_number))
+                    newAtom = top.addAtom(atomName, element, r, str(atom.serial_number), formalCharge=atom.formal_charge)
                     atomByNumber[atom.serial_number] = newAtom
         self._positions = []
         for model in pdb.iter_models(True):
@@ -344,6 +342,7 @@ class PDBFile(object):
         if is_quantity(positions):
             positions = positions.value_in_unit(angstroms)
         import numpy as np
+        positions = np.asarray(positions)
         if np.isnan(positions).any():
             raise ValueError('Particle position is NaN.  For more information, see https://github.com/openmm/openmm/wiki/Frequently-Asked-Questions#nan')
         if np.isinf(positions).any():
@@ -389,9 +388,13 @@ class PDBFile(object):
                     else:
                         atomName = atom.name
                     coords = positions[posIndex]
-                    line = "%s%5s %-4s %3s %s%4s%1s   %s%s%s  1.00  0.00          %2s  " % (
+                    if atom.formalCharge is not None:
+                        formalCharge = ("%+2d" % atom.formalCharge)[::-1]
+                    else:
+                        formalCharge = '  '
+                    line = "%s%5s %-4s %3s %s%4s%1s   %s%s%s  1.00  0.00          %2s%2s" % (
                         recordName, _formatIndex(atomIndex, 5), atomName, resName, chainName, resId, resIC, _format_83(coords[0]),
-                        _format_83(coords[1]), _format_83(coords[2]), symbol)
+                        _format_83(coords[1]), _format_83(coords[2]), symbol, formalCharge)
                     if len(line) != 80:
                         raise ValueError('Fixed width overflow detected')
                     print(line, file=file)

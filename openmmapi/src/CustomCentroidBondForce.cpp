@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2015-2016 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -194,4 +192,36 @@ void CustomCentroidBondForce::setUsesPeriodicBoundaryConditions(bool periodic) {
 
 bool CustomCentroidBondForce::usesPeriodicBoundaryConditions() const {
     return usePeriodic;
+}
+
+int CustomCentroidBondForce::getNumGroupsPerBond() const {
+    return groupsPerBond;
+}
+
+int CustomCentroidBondForce::getNumGroups() const {
+    return groups.size();
+}
+
+int CustomCentroidBondForce::getNumBonds() const {
+    return bonds.size();
+}
+
+int CustomCentroidBondForce::getNumPerBondParameters() const {
+    return bondParameters.size();
+}
+
+int CustomCentroidBondForce::getNumGlobalParameters() const {
+    return globalParameters.size();
+}
+
+int CustomCentroidBondForce::getNumTabulatedFunctions() const {
+    return functions.size();
+}
+
+int CustomCentroidBondForce::getNumFunctions() const {
+    return functions.size();
+}
+
+int CustomCentroidBondForce::getNumEnergyParameterDerivatives() const {
+    return energyParameterDerivatives.size();
 }

@@ -4,10 +4,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2013-2014 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -162,6 +160,14 @@ public:
     }
     ivec8 operator|(ivec8 other) const {
         return _mm256_castps_si256(_mm256_or_ps(_mm256_castsi256_ps(val), _mm256_castsi256_ps(other.val)));
+    }
+    ivec8 operator==(ivec8 other) const {
+        // _mm256_cmpeq_epi32() compiles to an AVX2-only instruction, so compare
+        // the lower and upper 128-bit 4-vectors of ints separately.
+        return _mm256_setr_m128i(lowerVec() == other.lowerVec(), upperVec() == other.upperVec());
+    }
+    ivec8 operator!=(ivec8 other) const {
+        return _mm256_castps_si256(_mm256_xor_ps(_mm256_castsi256_ps(*this == other), _mm256_castsi256_ps(_mm256_set1_epi32(0xFFFFFFFF))));
     }
     operator fvec8() const;
 };

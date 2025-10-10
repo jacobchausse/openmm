@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2008-2024 Stanford University and the Authors.      *
+ * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -29,6 +27,14 @@
 #include "CudaParallelKernels.h"
 #include "CudaPlatform.h"
 #include "openmm/common/CommonKernels.h"
+#include "openmm/common/CommonParallelKernels.h"
+#include "openmm/common/CommonCalcCustomGBForceKernel.h"
+#include "openmm/common/CommonCalcCustomHbondForceKernel.h"
+#include "openmm/common/CommonCalcCustomManyParticleForceKernel.h"
+#include "openmm/common/CommonCalcCustomNonbondedForceKernel.h"
+#include "openmm/common/CommonIntegrateCustomStepKernel.h"
+#include "openmm/common/CommonIntegrateNoseHooverStepKernel.h"
+#include "openmm/common/CommonIntegrateQTBStepKernel.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/OpenMMException.h"
 
@@ -36,39 +42,39 @@ using namespace OpenMM;
 
 KernelImpl* CudaKernelFactory::createKernelImpl(std::string name, const Platform& platform, ContextImpl& context) const {
     CudaPlatform::PlatformData& data = *static_cast<CudaPlatform::PlatformData*>(context.getPlatformData());
+    CudaContext& cu = *data.contexts[0];
     if (data.contexts.size() > 1) {
         // We are running in parallel on multiple devices, so we may want to create a parallel kernel.
         
         if (name == CalcForcesAndEnergyKernel::Name())
             return new CudaParallelCalcForcesAndEnergyKernel(name, platform, data);
         if (name == CalcHarmonicBondForceKernel::Name())
-            return new CudaParallelCalcHarmonicBondForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcHarmonicBondForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomBondForceKernel::Name())
-            return new CudaParallelCalcCustomBondForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomBondForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcHarmonicAngleForceKernel::Name())
-            return new CudaParallelCalcHarmonicAngleForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcHarmonicAngleForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomAngleForceKernel::Name())
-            return new CudaParallelCalcCustomAngleForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomAngleForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcPeriodicTorsionForceKernel::Name())
-            return new CudaParallelCalcPeriodicTorsionForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcPeriodicTorsionForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcRBTorsionForceKernel::Name())
-            return new CudaParallelCalcRBTorsionForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcRBTorsionForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCMAPTorsionForceKernel::Name())
-            return new CudaParallelCalcCMAPTorsionForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCMAPTorsionForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomTorsionForceKernel::Name())
-            return new CudaParallelCalcCustomTorsionForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomTorsionForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcNonbondedForceKernel::Name())
             return new CudaParallelCalcNonbondedForceKernel(name, platform, data, context.getSystem());
         if (name == CalcCustomNonbondedForceKernel::Name())
-            return new CudaParallelCalcCustomNonbondedForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomNonbondedForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomExternalForceKernel::Name())
-            return new CudaParallelCalcCustomExternalForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomExternalForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomHbondForceKernel::Name())
-            return new CudaParallelCalcCustomHbondForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomHbondForceKernel(name, platform, cu, context.getSystem());
         if (name == CalcCustomCompoundBondForceKernel::Name())
-            return new CudaParallelCalcCustomCompoundBondForceKernel(name, platform, data, context.getSystem());
+            return new CommonParallelCalcCustomCompoundBondForceKernel(name, platform, cu, context.getSystem());
     }
-    CudaContext& cu = *data.contexts[0];
     if (name == CalcForcesAndEnergyKernel::Name())
         return new CudaCalcForcesAndEnergyKernel(name, platform, cu);
     if (name == UpdateStateDataKernel::Name())
@@ -95,6 +101,8 @@ KernelImpl* CudaKernelFactory::createKernelImpl(std::string name, const Platform
         return new CommonCalcCustomTorsionForceKernel(name, platform, cu, context.getSystem());
     if (name == CalcNonbondedForceKernel::Name())
         return new CudaCalcNonbondedForceKernel(name, platform, cu, context.getSystem());
+    if (name == CalcConstantPotentialForceKernel::Name())
+        return new CudaCalcConstantPotentialForceKernel(name, platform, cu, context.getSystem());
     if (name == CalcCustomNonbondedForceKernel::Name())
         return new CommonCalcCustomNonbondedForceKernel(name, platform, cu, context.getSystem());
     if (name == CalcGBSAOBCForceKernel::Name())
@@ -115,6 +123,10 @@ KernelImpl* CudaKernelFactory::createKernelImpl(std::string name, const Platform
         return new CudaCalcATMForceKernel(name, platform, cu);
     if (name == CalcCustomCPPForceKernel::Name())
         return new CommonCalcCustomCPPForceKernel(name, platform, context, cu);
+    if (name == CalcOrientationRestraintForceKernel::Name())
+        return new CommonCalcOrientationRestraintForceKernel(name, platform, cu);
+    if (name == CalcRGForceKernel::Name())
+        return new CommonCalcRGForceKernel(name, platform, cu);
     if (name == CalcRMSDForceKernel::Name())
         return new CommonCalcRMSDForceKernel(name, platform, cu);
     if (name == CalcCustomManyParticleForceKernel::Name())
@@ -133,6 +145,10 @@ KernelImpl* CudaKernelFactory::createKernelImpl(std::string name, const Platform
         return new CommonIntegrateVariableLangevinStepKernel(name, platform, cu);
     if (name == IntegrateCustomStepKernel::Name())
         return new CommonIntegrateCustomStepKernel(name, platform, cu);
+    if (name == IntegrateDPDStepKernel::Name())
+        return new CommonIntegrateDPDStepKernel(name, platform, cu);
+    if (name == IntegrateQTBStepKernel::Name())
+        return new CommonIntegrateQTBStepKernel(name, platform, cu);
     if (name == ApplyAndersenThermostatKernel::Name())
         return new CommonApplyAndersenThermostatKernel(name, platform, cu);
     if (name == IntegrateNoseHooverStepKernel::Name())

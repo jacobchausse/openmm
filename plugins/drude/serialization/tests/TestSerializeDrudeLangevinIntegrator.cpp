@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                OpenMMDrude                                 *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2013 Stanford University and the Authors.           *
+ * Portions copyright (c) 2013-2024 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
  * Contributors:                                                              *
  *                                                                            *
@@ -46,6 +44,7 @@ void testSerialization() {
 
     DrudeLangevinIntegrator integ1(301.1, 0.95, 10.5, 1.2, 0.001);
     integ1.setRandomNumberSeed(18);
+    integ1.setIntegrationForceGroups(3);
 
     // Serialize and then deserialize it.
 
@@ -61,6 +60,7 @@ void testSerialization() {
     ASSERT_EQUAL(integ1.getDrudeTemperature(), integ2.getDrudeTemperature());
     ASSERT_EQUAL(integ1.getDrudeFriction(), integ2.getDrudeFriction());
     ASSERT_EQUAL(integ1.getRandomNumberSeed(), integ2.getRandomNumberSeed());
+    ASSERT_EQUAL(integ1.getIntegrationForceGroups(), integ2.getIntegrationForceGroups());
 }
 
 int main() {

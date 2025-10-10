@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2023 Stanford University and the Authors.           *
  * Authors: Peter Eastman, Emilio Gallicchio                                  *
@@ -50,9 +48,43 @@
 #include <random>
 #include <iostream>
 #include <vector>
+#include <string>
 
 using namespace OpenMM;
 using namespace std;
+
+void testAPI(){
+    ATMForce* atm = new ATMForce(0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.6, 0.8, -1.0);
+    atm->addParticle(Vec3(1, 2, 3), Vec3(4, 5, 6)); //old interface
+    atm->addParticle(new ATMForce::FixedDisplacement(Vec3(7, 8, 9), Vec3(10, 11, 12)));
+    atm->addParticle(new ATMForce::ParticleOffsetDisplacement(1, 0));
+    atm->addParticle();
+
+    Vec3 d1, d0;
+    atm->getParticleParameters(0, d1, d0);
+    ASSERT_EQUAL_VEC(Vec3(1, 2, 3), d1, 1e-6);
+    ASSERT_EQUAL_VEC(Vec3(4, 5, 6), d0, 1e-6);
+
+    const ATMForce::FixedDisplacement* fd = (dynamic_cast<const ATMForce::FixedDisplacement*>(&(atm->getParticleTransformation(1))));
+    d1 = fd->getFixedDisplacement1();
+    d0 = fd->getFixedDisplacement0();
+    ASSERT_EQUAL_VEC(Vec3(7, 8, 9), d1, 1e-6);
+    ASSERT_EQUAL_VEC(Vec3(10, 11, 12), d0, 1e-6);
+
+    const ATMForce::ParticleOffsetDisplacement* vt = (dynamic_cast<const ATMForce::ParticleOffsetDisplacement*>(&(atm->getParticleTransformation(2))));
+    int j1 = vt->getDestinationParticle1();
+    int i1 = vt->getOriginParticle1();
+    int j0 = vt->getDestinationParticle0();
+    int i0 = vt->getOriginParticle0();
+    ASSERT_EQUAL( 1, j1);
+    ASSERT_EQUAL( 0, i1);
+    ASSERT_EQUAL(-1, j0);
+    ASSERT_EQUAL(-1, i0);
+
+    atm->getParticleParameters(3, d1, d0);
+    ASSERT_EQUAL_VEC(Vec3(0, 0, 0), d1, 1e-6);
+    ASSERT_EQUAL_VEC(Vec3(0, 0, 0), d0, 1e-6);
+}
 
 void test2Particles() {
     // A pair of particles tethered by an harmonic bond.
@@ -76,10 +108,9 @@ void test2Particles() {
     bond->addBond(0, 1);
 
     ATMForce* atm = new ATMForce(lmbd, lmbd, 0., 0, 0, umax, ubcore, acore, direction);
-    Vec3 nodispl = Vec3(0., 0., 0.);
-    Vec3   displ = Vec3(1., 0., 0.);
-    atm->addParticle( nodispl );
-    atm->addParticle(   displ );
+    Vec3 displ = Vec3(1., 0., 0.);
+    atm->addParticle();
+    atm->addParticle(new ATMForce::FixedDisplacement(displ));
     atm->addForce(bond);
     atm->addEnergyParameterDerivative(ATMForce::Lambda1());
     atm->addEnergyParameterDerivative(ATMForce::Lambda2());
@@ -110,13 +141,78 @@ void test2Particles() {
     }
 }
 
+void test3ParticlesSwap() {
+    // A pair of particles tethered by harmonic bonds to a central particle.
+    // Swap the pair and test energy and forces at different lambda values
+
+    System system;
+    system.addParticle(1.0);
+    system.addParticle(1.0);
+    system.addParticle(1.0);
+
+    double lmbd = 0.5;
+    double umax =  0.;
+    double ubcore= 0.;
+    double acore = 0.;
+    double direction = 1.0;
+
+    Vec3 origin = Vec3(0., 0., 0.);
+    Vec3   r1 = Vec3(1., 0., 0.);
+    double r1sq = r1[0]*r1[0] + r1[1]*r1[1] + r1[2]*r1[2];
+    Vec3   r2 = Vec3(-2., 0., 0.);
+    double r2sq = r2[0]*r2[0] + r2[1]*r2[1] + r2[2]*r2[2];
+
+    vector<Vec3> positions(3);
+    positions[0] = origin;
+    positions[1] = r1;
+    positions[2] = r2;
+
+    CustomBondForce* bond = new CustomBondForce("0.5*kf*r^2");
+    double kf1 = 0.31;
+    double kf2 = 0.17;
+    bond->addPerBondParameter("kf");
+    std::vector<double> kf1v = {kf1};
+    bond->addBond(0, 1, kf1v);
+    std::vector<double> kf2v = {kf2};
+    bond->addBond(0, 2, kf2v);
+
+    ATMForce* atm = new ATMForce(lmbd, lmbd, 0., 0, 0, umax, ubcore, acore, direction);
+    //swap particles 1 and 2
+    atm->addParticle( ); //particle 0 is not displaced
+    atm->addParticle(new ATMForce::ParticleOffsetDisplacement(2,  1) );
+    atm->addParticle(new ATMForce::ParticleOffsetDisplacement(1,  2) );
+
+    atm->addForce(bond);
+    system.addForce(atm);
+
+    VerletIntegrator integrator(1.0);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+
+    for (double lm : {0.0, 0.5, 1.0}) {
+        context.setParameter(ATMForce::Lambda1(), lm);
+        context.setParameter(ATMForce::Lambda2(), lm);
+        State state = context.getState(State::Energy | State::Forces );
+        double epot = state.getPotentialEnergy();
+        double u0, u1, energy;
+        atm->getPerturbationEnergy(context, u1, u0, energy);
+        double epert = u1 - u0;
+        ASSERT_EQUAL_TOL(energy, epot, 1e-6);
+        ASSERT_EQUAL_TOL(0.5*kf1*r1sq + 0.5*kf2*r2sq, u0, 1e-6);
+        ASSERT_EQUAL_TOL(0.5*kf1*r2sq + 0.5*kf2*r1sq, u1, 1e-6);
+        ASSERT_EQUAL_TOL(0.5*kf1*(r2sq-r1sq) + 0.5*kf2*(r1sq-r2sq), epert, 1e-6);
+        ASSERT_EQUAL_TOL(u0 + lm*epert, epot, 1e-6);
+        ASSERT_EQUAL_VEC(- ( ((1.-lm)*kf1+lm*kf2)*r1 ), state.getForces()[1], 1e-6);
+        ASSERT_EQUAL_VEC(- ( ((1.-lm)*kf2+lm*kf1)*r2 ), state.getForces()[2], 1e-6);
+    }
+}
 
 void test2Particles2Displacement0() {
-    // A pair of particles tethered by an harmonic bond. 
+    // A pair of particles tethered by an harmonic bond.
     // Displace the second one to test energy and forces at different lambda values
     // In this version the second particle is displaced in both the initial and final states
     // by different amounts.
-  
+
     System system;
     system.addParticle(1.0);
     system.addParticle(1.0);
@@ -133,14 +229,13 @@ void test2Particles2Displacement0() {
 
     CustomBondForce* bond = new CustomBondForce("0.5*r^2");
     bond->addBond(0, 1);
-    
+
     ATMForce* atm = new ATMForce(lmbd, lmbd, 0., 0., 0., umax, ubcore, acore, direction);
     //first particle is not displaced at either state
-    Vec3 nodispl = Vec3(0., 0., 0.);
-    atm->addParticle( nodispl );
+    atm->addParticle();
     //second particle is displaced at both states but by the same amount (1,0,0)
     Vec3 displ0 = Vec3(1., 0., 0.);
-    atm->addParticle( displ0, displ0 );
+    atm->addParticle(new ATMForce::FixedDisplacement(displ0, displ0));
     atm->addForce(bond);
     system.addForce(atm);
 
@@ -151,7 +246,7 @@ void test2Particles2Displacement0() {
     State state;
     double epot, epert;
     double u0, u1, energy;
-    
+
     // U = U0 + lambda*epert; epert = U1 - U0
 
     // When the second particle is displaced by the same amount at each state,
@@ -194,6 +289,7 @@ double softCoreFunc(double u, double umax, double ub, double a, double& df) {
     return usc;
 }
 
+
 void test2ParticlesSoftCore() {
     // Similar to test2Particles() but employing a soft-core function
 
@@ -215,10 +311,9 @@ void test2ParticlesSoftCore() {
     bond->addBond(0, 1);
 
     ATMForce* atm = new ATMForce(lmbd, lmbd, 0., 0, 0, umax, ubcore, acore, direction);
-    Vec3 nodispl = Vec3(0., 0., 0.);
     Vec3   displ = Vec3(5., 0., 0.);
-    atm->addParticle( nodispl );
-    atm->addParticle(   displ );
+    atm->addParticle();
+    atm->addParticle(new ATMForce::FixedDisplacement(displ));
     atm->addForce(bond);
     system.addForce(atm);
 
@@ -241,7 +336,10 @@ void test2ParticlesSoftCore() {
     ASSERT_EQUAL_VEC(Vec3(-lmbd*df*displ[0], 0.0, 0.0), state.getForces()[1], 1e-6);
 }
 
+
 void testNonbonded() {
+    // Tests a system with a nonbonded Force
+
     System system;
     double u0, u1, energy;
     double lambda = 0.5;
@@ -258,10 +356,10 @@ void testNonbonded() {
     for (int i = 0; i < 6; i++)
         for (int j = 0; j < 6; j++)
             for (int k = 0; k < 6; k++) {
-	        positions.push_back(Vec3(spacing*i+offset, spacing*j+offset, spacing*k+offset));
-		system.addParticle(10.0);
-		nbforce->addParticle(0, 0.3, 1.0);
-		atm->addParticle(Vec3());
+                positions.push_back(Vec3(spacing*i+offset, spacing*j+offset, spacing*k+offset));
+                system.addParticle(10.0);
+                nbforce->addParticle(0, 0.3, 1.0);
+                atm->addParticle();
             }
     auto rng = std::default_random_engine {};
     std::shuffle(std::begin(positions), std::end(positions), rng);
@@ -285,7 +383,7 @@ void testNonbonded() {
     atm->getPerturbationEnergy(context1, u1, u0, energy);
     double epert1 = u1 - u0;
 
-    //in this second scenario the non-bonded force is remove from the System
+    //in this second scenario the non-bonded force is removed from the System
     system.removeForce(0);
     LangevinMiddleIntegrator integrator2(300, 1.0, 0.004);
     Context context2(system, integrator2, platform);
@@ -296,10 +394,60 @@ void testNonbonded() {
     double epot2 = state2.getPotentialEnergy();
     atm->getPerturbationEnergy(context2, u1, u0, energy);
     double epert2 = u1 - u0;
-
     ASSERT_EQUAL_TOL(epert1, epert2,  1e-3);
 }
 
+
+void testNonbondedwithEndpointClash() {
+    // Similar to testNonbonded() but at the initial alchemical state
+    // and with an invalid potential at the final state due to a clash
+    // between two particles.
+
+    System system;
+    double u0, u1, energy;
+    double lambda = 0.0; //U(lambda) = u0; it does not depend on u1
+    double width = 4.0;
+
+    system.setDefaultPeriodicBoxVectors(Vec3(width, 0, 0), Vec3(0, width, 0), Vec3(0, 0, width));
+    NonbondedForce* nbforce = new NonbondedForce();
+    nbforce->setNonbondedMethod(NonbondedForce::CutoffPeriodic);
+    nbforce->setCutoffDistance(0.7);
+    ATMForce* atm = new ATMForce(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+    double spacing = width/6.0;
+    double offset = spacing/5.0;
+    vector<Vec3> positions;
+    for (int i = 0; i < 6; i++)
+        for (int j = 0; j < 6; j++)
+            for (int k = 0; k < 6; k++) {
+                positions.push_back(Vec3(spacing*i+offset, spacing*j+offset, spacing*k+offset));
+                system.addParticle(10.0);
+                nbforce->addParticle(0, 0.3, 1.0);
+                atm->addParticle();
+            }
+    //places first particle almost on top of another particle in displaced system
+    atm->setParticleParameters(0, Vec3(spacing+1.e-4, 0, 0), Vec3(0.0, 0, 0));
+    atm->addForce(nbforce);
+    system.addForce(atm);
+    LangevinMiddleIntegrator integrator(300, 1.0, 0.004);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+    context.setParameter(ATMForce::Lambda1(), lambda);
+    context.setParameter(ATMForce::Lambda2(), lambda);
+
+    State state = context.getState(State::Energy, false);
+    double epot = state.getPotentialEnergy();
+    ASSERT(!isnan(epot) && !isinf(epot));
+
+    atm->getPerturbationEnergy(context, u1, u0, energy);
+    double epert = u1 - u0;
+    ASSERT(!isnan(energy) && !isinf(energy));
+    ASSERT(!isnan(epert) && !isinf(epert));
+
+    integrator.step(10);
+    state = context.getState(State::Energy | State::Positions, false);
+    vector<Vec3> positions2 = state.getPositions();
+    ASSERT(fabs(positions[0][0] - positions2[0][0]) < width);
+}
 
 void testParticlesCustomExpressionLinear() {
     // Similar to test2Particles() but employing a custom alchemical energy expression
@@ -318,10 +466,9 @@ void testParticlesCustomExpressionLinear() {
     double lmbd = 0.5;
     ATMForce* atm = new ATMForce("u0 + Lambda*(u1 - u0)");
     atm->addGlobalParameter("Lambda", lmbd);
-    Vec3 nodispl = Vec3(0., 0., 0.);
     Vec3   displ = Vec3(5., 0., 0.);
-    atm->addParticle( nodispl );
-    atm->addParticle(   displ );
+    atm->addParticle();
+    atm->addParticle(new ATMForce::FixedDisplacement(displ));
     atm->addForce(bond);
     system.addForce(atm);
 
@@ -354,7 +501,6 @@ void testParticlesCustomExpressionSoftplus() {
     positions[0] = Vec3(0, 0, 0);
     positions[1] = Vec3(0, 0, 0);
 
-    Vec3 nodispl = Vec3(0., 0., 0.);
     Vec3   displ = Vec3(2., 0., 0.);
 
     CustomBondForce* bond = new CustomBondForce("0.5*r^2");
@@ -373,8 +519,8 @@ void testParticlesCustomExpressionSoftplus() {
     atm->addGlobalParameter("Uh", uh);
     atm->addGlobalParameter("W0", w0);
 
-    atm->addParticle( nodispl );
-    atm->addParticle(   displ );
+    atm->addParticle();
+    atm->addParticle(new ATMForce::FixedDisplacement(displ));
     atm->addForce(bond);
     system.addForce(atm);
 
@@ -407,7 +553,7 @@ void testParticlesCustomExpressionSoftplus() {
 
 void testLargeSystem() {
     // Create a system with lots of particles, each displaced differently.
-    
+
     int numParticles = 1000;
     System system;
     system.setDefaultPeriodicBoxVectors(Vec3(3, 0, 0), Vec3(0, 3, 0), Vec3(0, 0, 3));
@@ -424,7 +570,7 @@ void testLargeSystem() {
         Vec3 d(genrand_real2(sfmt)-0.5, genrand_real2(sfmt)-0.5, genrand_real2(sfmt)-0.5);
         displacements.push_back(d);
         external->addParticle(i);
-        atm->addParticle(d);
+        atm->addParticle(new ATMForce::FixedDisplacement(d));
     }
 
     // Also add nonbonded forces to trigger atom reordering on the GPU.
@@ -441,7 +587,7 @@ void testLargeSystem() {
         nb1->addParticle({(double) (i%3)});
     nb1->setNonbondedMethod(CustomNonbondedForce::CutoffPeriodic);
     atm->addForce(nb1);
-    
+
     // Evaluate the forces to see if the particles are at the correct positions.
 
     VerletIntegrator integrator(1.0);
@@ -459,10 +605,140 @@ void testLargeSystem() {
     }
 }
 
+void testLargeSystemSwap() {
+    // Create a system with lots of particles in an external field
+    // that depends on atom indexes. Swap their positions, check
+    // energies and forces.
+
+    int numParticles = 1000;
+    System system;
+    system.setDefaultPeriodicBoxVectors(Vec3(3, 0, 0), Vec3(0, 3, 0), Vec3(0, 0, 3));
+    CustomExternalForce* external = new CustomExternalForce("qf*(x^2 + 2*y^2 + 3*z^2)");
+    external->addPerParticleParameter("qf");
+    ATMForce* atm = new ATMForce(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+    atm->addForce(external);
+    system.addForce(atm);
+    OpenMM_SFMT::SFMT sfmt;
+    init_gen_rand(0, sfmt);
+    Vec3 nodispl = Vec3(0,0,0);
+    vector<Vec3> positions;
+    vector<int> target_particle(numParticles);
+    for (int i = 0; i < numParticles; i++) {
+        target_particle[i] = i;
+    }
+    auto rng = default_random_engine {};
+    shuffle(begin(target_particle), end(target_particle), rng);
+    vector<int> target_particle_inv(numParticles);
+    for (int i = 0; i < numParticles; i++) {
+        target_particle_inv[target_particle[i]] = i;
+    }
+    vector<double> qf(numParticles);
+    for (int i = 0; i < numParticles; i++)
+      qf[i] = (double)i/(double)numParticles;
+    for (int i = 0; i < numParticles; i++) {
+        system.addParticle(1.0);
+        positions.push_back(3*Vec3(genrand_real2(sfmt), genrand_real2(sfmt), genrand_real2(sfmt)));
+        external->addParticle(i, {qf[i]});
+        atm->addParticle(new ATMForce::ParticleOffsetDisplacement(target_particle[i], i));
+    }
+
+    double energy0 = 0.;
+    for (int i = 0; i < numParticles; i++) {
+        Vec3 pos = positions[i];
+        energy0 += qf[i]*(pos[0]*pos[0]+2*pos[1]*pos[1]+3*pos[2]*pos[2]);
+    }
+    double energy1 = 0.;
+    for (int i = 0; i < numParticles; i++) {
+        Vec3 pos = positions[target_particle[i]];
+        energy1 += qf[i]*(pos[0]*pos[0]+2*pos[1]*pos[1]+3*pos[2]*pos[2]);
+    }
+
+    // Also add nonbonded forces to trigger atom reordering on the GPU.
+
+    CustomNonbondedForce* nb = new CustomNonbondedForce("a*r^2");
+    nb->addGlobalParameter("a", 0.0);
+    for (int i = 0; i < numParticles; i++)
+        nb->addParticle();
+    nb->setNonbondedMethod(CustomNonbondedForce::CutoffPeriodic);
+    system.addForce(nb);
+    CustomNonbondedForce* nb1 = new CustomNonbondedForce("0");
+    nb1->addPerParticleParameter("b");
+    for (int i = 0; i < numParticles; i++)
+        nb1->addParticle({(double) (i%3)});
+    nb1->setNonbondedMethod(CustomNonbondedForce::CutoffPeriodic);
+    atm->addForce(nb1);
+
+    // Evaluate energies and forces at lambda 0 and 1
+    VerletIntegrator integrator(1.0);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+    for (double lambda : {0.0, 1.0}) {
+        context.setParameter(ATMForce::Lambda1(), lambda);
+        context.setParameter(ATMForce::Lambda2(), lambda);
+        State state = context.getState(State::Energy | State::Forces);
+        double u1, u0, energy;
+        double epot = state.getPotentialEnergy();
+        atm->getPerturbationEnergy(context, u1, u0, energy);
+        ASSERT_EQUAL_TOL(u0, energy0, 1e-6);
+        ASSERT_EQUAL_TOL(u1, energy1, 1e-6);
+        ASSERT_EQUAL_TOL(u0+lambda*(u1-u0), epot, 1e-6);
+        for (int i = 0; i < numParticles; i++) {
+            int l;
+            if (lambda > 0){
+                l = target_particle_inv[i];
+            }else{
+                l = i;
+            }
+            Vec3 pos = positions[i];
+            Vec3 expectedForce(-2*pos[0], -4*pos[1], -6*pos[2]);
+            ASSERT_EQUAL_VEC(qf[l]*expectedForce, state.getForces()[i], 1e-6);
+        }
+    }
+}
+
+void testChangingBoxVectors() {
+    // Create a periodic system with incorrect default box vectors.
+
+    int numParticles = 500;
+    System system;
+    system.setDefaultPeriodicBoxVectors(Vec3(3, 0, 0), Vec3(0, 3, 0), Vec3(0, 0, 3));
+    NonbondedForce* force = new NonbondedForce();
+    force->setNonbondedMethod(NonbondedForce::CutoffPeriodic);
+    ATMForce* atm = new ATMForce(0.0, 0.0, 0.1, 0.0, 0.0, 1e6, 5e5, 1.0/16, 1.0);
+    atm->addForce(force);
+    system.addForce(atm);
+    OpenMM_SFMT::SFMT sfmt;
+    init_gen_rand(0, sfmt);
+    vector<Vec3> positions;
+    for (int i = 0; i < numParticles; i++) {
+        system.addParticle(1.0);
+        positions.push_back(3*Vec3(genrand_real2(sfmt)-0.5, genrand_real2(sfmt)-0.5, genrand_real2(sfmt)-0.5));
+        force->addParticle(0.0, 0.1, 1.0);
+        atm->addParticle();
+        for (int j = 0; j < i; j++) {
+            Vec3 delta = positions[i]-positions[j];
+            for (int k = 0; k < 3; k++)
+                delta[k] -= round(delta[k]/2.0)*2.0;
+            if (sqrt(delta.dot(delta)) < 0.1)
+                force->addException(i, j, 0.0, 0.1, 0.0);
+        }
+    }
+
+    // Set the correct box vectors in the context and check that energy is calculated correctly.
+
+    VerletIntegrator integrator(0.001);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+    context.setPeriodicBoxVectors(Vec3(2, 0, 0), Vec3(0, 2, 0), Vec3(0, 0, 2));
+    double energy1 = context.getState(State::Energy).getPotentialEnergy();
+    double energy2 = context.getState(State::Energy).getPotentialEnergy();
+    ASSERT_EQUAL_TOL(energy1, energy2, 1e-6);
+}
+
 void testMolecules() {
     // Verify that ATMForce correctly propagates information about molecules
     // from the forces it contains.
-    
+
     System system;
     for (int i = 0; i < 5; i++)
         system.addParticle(1.0);
@@ -512,7 +788,7 @@ void testSimulation() {
                 system.addParticle(10.0);
                 positions.push_back(Vec3(0.6*i, 0.6*j, 0.6*k));
                 nb->addParticle(0, 0.3, 1.0);
-                atm->addParticle(Vec3());
+                atm->addParticle();
             }
     atm->setParticleParameters(0, Vec3(0.3, 0, 0), Vec3(-0.3, 0, 0));
 
@@ -542,13 +818,18 @@ void runPlatformTests();
 int main(int argc, char* argv[]) {
     try {
         initializeTests(argc, argv);
+        testAPI();
         test2Particles();
+        test3ParticlesSwap();
         test2Particles2Displacement0();
         test2ParticlesSoftCore();
         testNonbonded();
+        testNonbondedwithEndpointClash();
         testParticlesCustomExpressionLinear();
         testParticlesCustomExpressionSoftplus();
         testLargeSystem();
+        testLargeSystemSwap();
+        testChangingBoxVectors();
         testMolecules();
         testSimulation();
         runPlatformTests();

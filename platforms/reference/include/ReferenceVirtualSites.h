@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2012-2023 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -44,11 +42,11 @@ public:
     /**
      * Compute the positions of all virtual sites.
      */
-    void computePositions(const System& system, std::vector<Vec3>& atomCoordinates) const;
+    void computePositions(const OpenMM::System& system, std::vector<OpenMM::Vec3>& atomCoordinates, const Vec3* boxVectors) const;
     /**
      * Distribute forces from virtual sites to the atoms they are based on.
      */
-    void distributeForces(const System& system, const std::vector<Vec3>& atomCoordinates, std::vector<Vec3>& forces) const;
+    void distributeForces(const System& system, const std::vector<Vec3>& atomCoordinates, std::vector<Vec3>& forces, const Vec3* boxVectors) const;
 private:
     std::vector<int> order;
 };

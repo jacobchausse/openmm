@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2016 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -243,4 +241,40 @@ ForceImpl* CustomGBForce::createImpl() const {
 
 void CustomGBForce::updateParametersInContext(Context& context) {
     dynamic_cast<CustomGBForceImpl&>(getImplInContext(context)).updateParametersInContext(getContextImpl(context));
+}
+
+int CustomGBForce::getNumParticles() const {
+    return particles.size();
+}
+
+int CustomGBForce::getNumExclusions() const {
+    return exclusions.size();
+}
+
+int CustomGBForce::getNumPerParticleParameters() const {
+    return parameters.size();
+}
+
+int CustomGBForce::getNumGlobalParameters() const {
+    return globalParameters.size();
+}
+
+int CustomGBForce::getNumEnergyParameterDerivatives() const {
+    return energyParameterDerivatives.size();
+}
+
+int CustomGBForce::getNumTabulatedFunctions() const {
+    return functions.size();
+}
+
+int CustomGBForce::getNumFunctions() const {
+    return functions.size();
+}
+
+int CustomGBForce::getNumComputedValues() const {
+    return computedValues.size();
+}
+
+int CustomGBForce::getNumEnergyTerms() const {
+    return energyTerms.size();
 }

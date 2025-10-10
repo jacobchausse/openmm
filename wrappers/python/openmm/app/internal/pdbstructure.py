@@ -1,10 +1,8 @@
 """
 pdbstructure.py: Used for managing PDB formated files.
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012-2021 Stanford University and the Authors.
 Authors: Christopher M. Bruns
@@ -785,8 +783,15 @@ class Atom(object):
         # segment id, element_symbol, and formal_charge are not always present
         self.segment_id = pdb_line[72:76].strip()
         self.element_symbol = pdb_line[76:78].strip()
-        try: self.formal_charge = int(pdb_line[78:80])
-        except ValueError: self.formal_charge = None
+        try:
+            # formal_charge should always be a one digit followed by a sign, eg "2-", "3+"
+            # this is a bit more permissive, it will also read "-2", "+3", or "3 "
+            formal_charge = pdb_line[78:80]
+            if formal_charge.endswith('+') or formal_charge.endswith('-'):
+                formal_charge = formal_charge[::-1]
+            self.formal_charge = int(formal_charge)
+        except ValueError:
+            self.formal_charge = None
         # figure out atom element
         if self.element_symbol == extraParticleIdentifier:
             self.element = 'EP'
@@ -904,7 +909,7 @@ class Atom(object):
         end =  "%-4s%2s" % (\
             self.segment_id, self.element_symbol)
         formal_charge = "  "
-        if (self.formal_charge != None): formal_charge = "%+2d" % self.formal_charge
+        if (self.formal_charge is not None): formal_charge = ("%+2d" % self.formal_charge)[::-1]
         return names+numbers+end+formal_charge
 
     def __str__(self):
@@ -1068,7 +1073,7 @@ if __name__=='__main__':
             subdir = "ae"
             full_subdir = os.path.join(pdb_dir, subdir)
             for pdb_file in os.listdir(full_subdir):
-                if not re.match("pdb.%2s.\.ent\.gz" % subdir , pdb_file):
+                if not re.match(r"pdb.%2s.\.ent\.gz" % subdir , pdb_file):
                     continue
                 full_pdb_file = os.path.join(full_subdir, pdb_file)
                 parse_one_pdb(full_pdb_file)
@@ -1079,7 +1084,7 @@ if __name__=='__main__':
                 if not os.path.isdir(full_subdir):
                     continue
                 for pdb_file in os.listdir(full_subdir):
-                    if not re.match("pdb.%2s.\.ent\.gz" % subdir , pdb_file):
+                    if not re.match(r"pdb.%2s.\.ent\.gz" % subdir , pdb_file):
                         continue
                     full_pdb_file = os.path.join(full_subdir, pdb_file)
                     parse_one_pdb(full_pdb_file)

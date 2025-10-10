@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2010-2014 Stanford University and the Authors.      *
  * Authors: Andrew C. Simmonett and Andreas Kraemer
@@ -45,6 +43,7 @@ void assertIntegratorsEqual(const NoseHooverIntegrator& integrator1, const NoseH
     ASSERT_EQUAL(integrator1.getConstraintTolerance(), integrator2.getConstraintTolerance());
     ASSERT_EQUAL(integrator1.getMaximumPairDistance(), integrator2.getMaximumPairDistance());
     ASSERT_EQUAL(integrator1.getNumThermostats(), integrator2.getNumThermostats());
+    ASSERT_EQUAL(integrator1.getIntegrationForceGroups(), integrator2.getIntegrationForceGroups());
     for (int i = 0; i < integrator1.getNumThermostats(); i++) {
         const auto &thermostat1 = integrator1.getThermostat(i);
         const auto &thermostat2 = integrator2.getThermostat(i);
@@ -82,6 +81,7 @@ void testSerialization() {
     integrator_sub.addSubsystemThermostat(
         {0,1,2,3,4,7}, {{0,7}}, 301.1, 1.1, 1.2, 1.3, 9, 2, 5
     );
+    integrator_sub.setIntegrationForceGroups(3);
 
     // Serialize and then deserialize it.
 

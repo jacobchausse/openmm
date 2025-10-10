@@ -1,12 +1,10 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2010 Stanford University and the Authors.           *
+ * Portions copyright (c) 2010-2024 Stanford University and the Authors.      *
  * Authors: Andrew C. Simmonett, Andreas Krämer                               *
  * Contributors:                                                              *
  *                                                                            *
@@ -57,6 +55,7 @@ void DrudeNoseHooverIntegratorProxy::serialize(const void* object, Serialization
     node.setIntProperty("chainLength", integrator.getThermostat().getChainLength());
     node.setIntProperty("numMTS", integrator.getThermostat().getNumMultiTimeSteps());
     node.setIntProperty("numYS", integrator.getThermostat().getNumYoshidaSuzukiTimeSteps());
+    node.setIntProperty("integrationForceGroups", integrator.getIntegrationForceGroups());
 }
 
 void* DrudeNoseHooverIntegratorProxy::deserialize(const SerializationNode& node) const {
@@ -75,6 +74,7 @@ void* DrudeNoseHooverIntegratorProxy::deserialize(const SerializationNode& node)
     );
     integrator->setConstraintTolerance(node.getDoubleProperty("constraintTolerance"));
     integrator->setMaximumPairDistance(node.getDoubleProperty("maximumPairDistance"));
+    integrator->setIntegrationForceGroups(node.getIntProperty("integrationForceGroups", 0xFFFFFFFF));
 
     return integrator;
 }

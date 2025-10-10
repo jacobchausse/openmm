@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2011-2020 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -377,4 +375,20 @@ void CustomIntegrator::deserializeParameters(const SerializationNode& node) {
             perDofValues.push_back(Vec3(child.getDoubleProperty("x"), child.getDoubleProperty("y"), child.getDoubleProperty("z")));
         setPerDofVariableByName(var.getName(), perDofValues);
     }
+}
+
+int CustomIntegrator::getNumGlobalVariables() const {
+    return globalNames.size();
+}
+
+int CustomIntegrator::getNumPerDofVariables() const {
+    return perDofNames.size();
+}
+
+int CustomIntegrator::getNumComputations() const {
+    return computations.size();
+}
+
+int CustomIntegrator::getNumTabulatedFunctions() const {
+    return functions.size();
 }

@@ -78,6 +78,7 @@ foreach(SUBDIR ${SUBDIRS})
         "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}/*psf"
         "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}/charmm22.*"
         "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}/par*.inp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}/*.xyz"
     )
     foreach(file ${STAGING_INPUT_FILES1})
         set(STAGING_INPUT_FILES ${STAGING_INPUT_FILES} "${file}")
@@ -279,6 +280,18 @@ add_custom_target(PythonSdist
     DEPENDS ${STAGING_OUTPUT_FILES} "${CMAKE_CURRENT_BINARY_DIR}/pysetupsdist.cmake"
     WORKING_DIRECTORY ${OPENMM_PYTHON_STAGING_DIR}
     COMMENT "Packaging source distribution package (sdist)..."
+)
+
+# Wheel
+set(PYTHON_SETUP_COMMAND bdist_wheel)
+configure_file(pysetup.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/pysetupbdist_wheel.cmake" @ONLY)
+add_custom_target(PythonBdistWheel
+    COMMAND ${CMAKE_COMMAND}
+        -P "${CMAKE_CURRENT_BINARY_DIR}/pysetupbdist_wheel.cmake"
+    DEPENDS ${STAGING_OUTPUT_FILES} "${CMAKE_CURRENT_BINARY_DIR}/pysetupbdist_wheel.cmake"
+    WORKING_DIRECTORY ${OPENMM_PYTHON_STAGING_DIR}
+    COMMENT "Packaging wheel (bdist_wheel)..."
 )
 
 set(OPENMM_PYTHON_USER_INSTALL OFF CACHE BOOL

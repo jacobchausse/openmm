@@ -1,5 +1,6 @@
 from collections import defaultdict
 import unittest
+import random
 
 from validateModeller import *
 from openmm.app import *
@@ -980,6 +981,33 @@ class TestModeller(unittest.TestCase):
             names1 = sorted([a.name for a in res1.atoms()])
             names2 = sorted([a.name for a in res2.atoms()])
             self.assertEqual(names1, names2)
+        # Reset the loaded definitions so we don't affect other tests.
+        Modeller._residueHydrogens = {}
+        Modeller._hasLoadedStandardHydrogens = False
+
+    def test_addSpecificHydrogens(self):
+        """Test specifying exactly which hydrogens to add."""
+        pdb = PDBFile('systems/glycopeptide.pdb')
+        variants = [None]*pdb.topology.getNumResidues()
+        for residue in pdb.topology.residues():
+            if residue.name != 'ALA':
+                var = []
+                for atom1, atom2 in residue.bonds():
+                    if atom1.element == element.hydrogen:
+                        var.append((atom1.name, atom2.name))
+                    elif atom2.element == element.hydrogen:
+                        var.append((atom2.name, atom1.name))
+                variants[residue.index] = var
+        modeller = Modeller(pdb.topology, pdb.positions)
+        hydrogens = [a for a in modeller.topology.atoms() if a.element == element.hydrogen and random.random() < 0.7]
+        modeller.delete(hydrogens)
+        self.assertTrue(modeller.topology.getNumAtoms() < pdb.topology.getNumAtoms())
+        modeller.addHydrogens(variants=variants)
+        self.assertEqual(modeller.topology.getNumAtoms(), pdb.topology.getNumAtoms())
+        for res1, res2 in zip(pdb.topology.residues(), modeller.topology.residues()):
+            names1 = sorted([a.name for a in res1.atoms()])
+            names2 = sorted([a.name for a in res2.atoms()])
+            self.assertEqual(names1, names2)
 
     def test_removeExtraHydrogens(self):
         """Test that addHydrogens() can remove hydrogens that shouldn't be there. """
@@ -1059,7 +1087,7 @@ class TestModeller(unittest.TestCase):
         residue = topology.addResidue('Test', chain)
         topology.addAtom('C', element.carbon, residue)
         topology.addAtom('N', element.nitrogen, residue)
-        topology.addAtom('V', element.oxygen, residue)
+        topology.addAtom('O', element.oxygen, residue)
 
 
         # Add the virtual sites.
@@ -1085,6 +1113,54 @@ class TestModeller(unittest.TestCase):
         state = context.getState(getPositions=True)
         for p1, p2 in zip (pos, state.getPositions()):
             self.assertVecAlmostEqual(p1.value_in_unit(nanometers), p2.value_in_unit(nanometers), 1e-6)
+
+
+    def testNestedVirtualSites(self):
+        """Test adding virtual sites that depend on other virtual sites."""
+        xml = """
+            <ForceField>
+             <AtomTypes>
+              <Type name="C" class="C" element="C" mass="10"/>
+              <Type name="N" class="N" element="N" mass="10"/>
+              <Type name="V" class="V" mass="0.0"/>
+             </AtomTypes>
+             <Residues>
+              <Residue name="Test">
+               <Atom name="C" type="C"/>
+               <Atom name="N" type="N"/>
+               <Atom name="V1" type="V"/>
+               <Atom name="V2" type="V"/>
+               <VirtualSite type="average2" index="2" atom1="0" atom2="1" weight1="0.5" weight2="0.5"/>
+               <VirtualSite type="average2" index="3" atom1="0" atom2="2" weight1="0.5" weight2="0.5"/>
+              </Residue>
+             </Residues>
+            </ForceField>"""
+        ff = ForceField(StringIO(xml))
+
+        # Create the three real atoms.
+
+        topology = Topology()
+        chain = topology.addChain()
+        residue = topology.addResidue('Test', chain)
+        topology.addAtom('C', element.carbon, residue)
+        topology.addAtom('N', element.nitrogen, residue)
+
+        # Add the virtual sites.
+
+        modeller = Modeller(topology, [Vec3(0.0, 0.0, 0.0), Vec3(1.0, 0.0, 0.0)]*nanometers)
+        modeller.addExtraParticles(ff)
+        top = modeller.topology
+        pos = modeller.positions
+
+        # Check that the correct particles were added.
+
+        self.assertEqual(len(pos), 4)
+        for atom, elem in zip(top.atoms(), [element.carbon, element.nitrogen, None, None]):
+            self.assertEqual(elem, atom.element)
+
+        # The positions of the first virtual site should be correct, but the second one won't be.
+
+        self.assertVecAlmostEqual(Vec3(0.5, 0.0, 0.0), pos[2].value_in_unit(nanometers), 1e-6)
 
 
     def test_multiSiteIon(self):
@@ -1158,47 +1234,48 @@ class TestModeller(unittest.TestCase):
         """Test adding a membrane to a realistic system."""
 
         mol = PDBxFile('systems/gpcr.cif')
-        modeller = Modeller(mol.topology, mol.positions)
-        ff = ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+        for ff_files in [['amber14-all.xml', 'amber14/tip3p.xml'], ['amber19-all.xml', 'amber19/opc3.xml']]:
+            modeller = Modeller(mol.topology, mol.positions)
+            ff = ForceField(*ff_files)
 
-        # Add a membrane around the GPCR
-        modeller.addMembrane(ff, minimumPadding=1.1*nanometers, ionicStrength=1*molar)
+            # Add a membrane around the GPCR
+            modeller.addMembrane(ff, minimumPadding=1.1*nanometers, ionicStrength=1*molar)
 
-        # Make sure we added everything correctly
-        resCount = defaultdict(int)
-        for res in modeller.topology.residues():
-            resCount[res.name] += 1
+            # Make sure we added everything correctly
+            resCount = defaultdict(int)
+            for res in modeller.topology.residues():
+                resCount[res.name] += 1
 
-        self.assertEqual(16, resCount['ALA'])
-        self.assertEqual(226, resCount['POP'])  # 2x128 - overlapping
-        self.assertTrue(resCount['HOH'] > 1)
+            self.assertEqual(16, resCount['ALA'])
+            self.assertEqual(226, resCount['POP'])  # 2x128 - overlapping
+            self.assertTrue(resCount['HOH'] > 1)
 
-        deltaQ = resCount['CL'] - resCount['NA']
-        self.assertEqual(deltaQ, 10)  # protein net q: +10
+            deltaQ = resCount['CL'] - resCount['NA']
+            self.assertEqual(deltaQ, 10)  # protein net q: +10
 
-        # Check _addIons did the right thing.
-        expected_ion_fraction = 1.0*molar/(55.4*molar)
+            # Check _addIons did the right thing.
+            expected_ion_fraction = 1.0*molar/(55.4*molar)
 
-        total_water = resCount['HOH']
-        total_water_ions = resCount['HOH'] + resCount['CL'] + resCount['NA']
+            total_water = resCount['HOH']
+            total_water_ions = resCount['HOH'] + resCount['CL'] + resCount['NA']
 
-        # total_water_ions - protein charge
-        expected_sodium = math.floor((total_water_ions-10)*expected_ion_fraction+0.5)
-        expected_chlorine = expected_sodium + 10
+            # total_water_ions - protein charge
+            expected_sodium = math.floor((total_water_ions-10)*expected_ion_fraction+0.5)
+            expected_chlorine = expected_sodium + 10
 
-        self.assertEqual(resCount['CL'], expected_chlorine)
-        self.assertEqual(resCount['NA'], expected_sodium)
+            self.assertEqual(resCount['CL'], expected_chlorine)
+            self.assertEqual(resCount['NA'], expected_sodium)
 
-        # Check lipid numbering for repetitions
-        lipidIdList = [(r.chain.id, r.id) for r in modeller.topology.residues()
-                       if r.name == 'POP']
-        self.assertEqual(len(lipidIdList), len(set(lipidIdList)))
+            # Check lipid numbering for repetitions
+            lipidIdList = [(r.chain.id, r.id) for r in modeller.topology.residues()
+                        if r.name == 'POP']
+            self.assertEqual(len(lipidIdList), len(set(lipidIdList)))
 
-        # Check dimensions to see if padding was respected
-        originalSize = max(mol.positions) - min(mol.positions)
-        newSize = modeller.topology.getUnitCellDimensions()
-        for i in range(3):
-            self.assertTrue(newSize[i] >= originalSize[i]+1.1*nanometers)
+            # Check dimensions to see if padding was respected
+            originalSize = max(mol.positions) - min(mol.positions)
+            newSize = modeller.topology.getUnitCellDimensions()
+            for i in range(3):
+                self.assertTrue(newSize[i] >= originalSize[i]+1.1*nanometers)
 
     def test_bondTypeAndOrderPreserved(self):
         """ Check that bond type and order are preserved across multiple operations. 

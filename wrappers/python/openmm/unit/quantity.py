@@ -32,7 +32,7 @@ Some features of this implementation:
     area for us is at the molecular scale. Using SI units internally
     can lead to exponent overflow in commonly used molecular force
     calculations. Internally, all unit systems are equally fundamental
-    in SimTK.
+    in OpenMM.
 
 Two possible enhancements that have not been implemented are
   1) Include uncertainties with propagation of errors
@@ -40,10 +40,8 @@ Two possible enhancements that have not been implemented are
 
 
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012 Stanford University and the Authors.
 Authors: Christopher M. Bruns
@@ -215,8 +213,7 @@ class Quantity(object):
     def __repr__(self):
         """
         """
-        return (Quantity.__name__ + '(value=' + repr(self._value) + ', unit=' +
-                str(self.unit) + ')')
+        return str(self)
 
     def format(self, format_spec):
         return format_spec % self._value + ' ' + str(self.unit.get_symbol())

@@ -4,12 +4,10 @@
 /* -------------------------------------------------------------------------- *
  *                              OpenMMAmoeba                                  *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
- * Portions copyright (c) 2008-2021 Stanford University and the Authors.      *
+ * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Mark Friedrichs, Peter Eastman                                    *
  * Contributors:                                                              *
  *                                                                            *
@@ -30,10 +28,9 @@
 #include "openmm/amoebaKernels.h"
 #include "openmm/kernels.h"
 #include "openmm/System.h"
+#include "openmm/common/ComputeSort.h"
 #include "AmoebaCommonKernels.h"
 #include "OpenCLContext.h"
-#include "OpenCLFFT3D.h"
-#include "OpenCLSort.h"
 
 namespace OpenMM {
 
@@ -43,28 +40,14 @@ namespace OpenMM {
 class OpenCLCalcAmoebaMultipoleForceKernel : public CommonCalcAmoebaMultipoleForceKernel {
 public:
     OpenCLCalcAmoebaMultipoleForceKernel(const std::string& name, const Platform& platform, OpenCLContext& cl, const System& system) :
-            CommonCalcAmoebaMultipoleForceKernel(name, platform, cl, system), fft(NULL) {
+            CommonCalcAmoebaMultipoleForceKernel(name, platform, cl, system) {
     }
-    ~OpenCLCalcAmoebaMultipoleForceKernel();
-    /**
-     * Initialize the kernel.
-     * 
-     * @param system     the System this kernel will be applied to
-     * @param force      the AmoebaMultipoleForce this kernel will be used for
-     */
-    void initialize(const System& system, const AmoebaMultipoleForce& force);
-    /**
-     * Compute the FFT.
-     */
-    void computeFFT(bool forward);
     /**
      * Get whether charge spreading should be done in fixed point.
      */
     bool useFixedPointChargeSpreading() const {
         return true;
     }
-private:
-    OpenCLFFT3D* fft;
 };
 
 
@@ -74,9 +57,8 @@ private:
 class OpenCLCalcHippoNonbondedForceKernel : public CommonCalcHippoNonbondedForceKernel {
 public:
     OpenCLCalcHippoNonbondedForceKernel(const std::string& name, const Platform& platform, OpenCLContext& cl, const System& system) :
-            CommonCalcHippoNonbondedForceKernel(name, platform, cl, system), sort(NULL), hasInitializedFFT(false) {
+            CommonCalcHippoNonbondedForceKernel(name, platform, cl, system) {
     }
-    ~OpenCLCalcHippoNonbondedForceKernel();
     /**
      * Initialize the kernel.
      * 
@@ -84,10 +66,6 @@ public:
      * @param force      the HippoNonbondedForce this kernel will be used for
      */
     void initialize(const System& system, const HippoNonbondedForce& force);
-    /**
-     * Compute the FFT.
-     */
-    void computeFFT(bool forward, bool dispersion);
     /**
      * Get whether charge spreading should be done in fixed point.
      */
@@ -99,7 +77,7 @@ public:
      */
     void sortGridIndex();
 private:
-    class SortTrait : public OpenCLSort::SortTrait {
+    class SortTrait : public ComputeSortImpl::SortTrait {
         int getDataSize() const {return 8;}
         int getKeySize() const {return 4;}
         const char* getDataType() const {return "int2";}
@@ -109,9 +87,7 @@ private:
         const char* getMaxValue() const {return "make_int2(2147483647, 2147483647)";}
         const char* getSortKey() const {return "value.y";}
     };
-    bool hasInitializedFFT;
-    OpenCLSort* sort;
-    OpenCLFFT3D *fftForward, *fftBackward, *dfftForward, *dfftBackward;
+    ComputeSort sort;
 };
 
 } // namespace OpenMM
