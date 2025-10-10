@@ -396,7 +396,7 @@ double RPMDIntegrator::getKineticTemperature(int subtractDOF) {
     }
 
     double temp = 0.0;
-    const double factor = 1/(3*(numParticles-subtractDOF-numVirtualParticles)*numCopies*BOLTZ);
+    const double factor = 1/((3*numParticles-3*numVirtualParticles-subtractDOF)*numCopies*BOLTZ);
 
     Vec3 vel;
 

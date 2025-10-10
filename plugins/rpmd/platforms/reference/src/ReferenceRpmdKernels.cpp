@@ -37,8 +37,13 @@
   #define POCKETFFT_NO_VECTORS
 #endif
 #define POCKETFFT_CACHE_SIZE 4096
+#define POCKETFFT_NO_MULTITHREADING
 #include "pocketfft_hdronly.h"
 #include <complex>
+#include <omp.h>
+
+#include <iostream>
+#include <unistd.h>
 
 using namespace OpenMM;
 using namespace std;
@@ -106,23 +111,43 @@ void ReferenceIntegrateRPMDStepKernel::initialize(const System& system, const RP
     }
 }
 
+void omptest() {
+    //#pragma omp parallel
+    {
+        usleep(5000 * omp_get_thread_num()); // do this to avoid race condition while printing
+        std::cout << "Number of available threads: " << omp_get_num_threads() << std::endl;
+        // each thread can also get its own number
+        std::cout << "Current thread number: " << omp_get_thread_num() << std::endl;
+    }
+}
+
+void ompout(int number) {
+    usleep(5000 * omp_get_thread_num()); // do this to avoid race condition while printing
+    std::cout << number << " - Thread num: " << omp_get_thread_num() << std::endl;
+}
+
 void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
+
+    
+    //omptest();
+
     const int numCopies = positions.size();
     const int numParticles = positions[0].size();
     const double dt = integrator.getStepSize();
     const double halfdt = 0.5*dt;
     const System& system = context.getSystem();
-    vector<Vec3>& pos = extractPositions(context);
-    vector<Vec3>& vel = extractVelocities(context);
-    vector<Vec3>& f = extractForces(context);
+    //vector<Vec3>& pos = extractPositions(context);
+    //vector<Vec3>& vel = extractVelocities(context);
+    //vector<Vec3>& f = extractForces(context);
+    
     
     // Loop over copies and compute the force on each one.
     
     if (!forcesAreValid)
         computeForcesClosedPath(context, integrator);
-
-    // Apply the PILE-L thermostat.
     
+    // Apply the PILE-L thermostat.
+
     vector<complex<double>> v(numCopies);
     vector<complex<double>> q(numCopies);
     const double hbar = 1.054571628e-34*AVOGADRO/(1000*1e-12);
@@ -132,8 +157,10 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
     const double c1_0 = exp(-halfdt*integrator.getFriction());
     const double c2_0 = sqrt(1.0-c1_0*c1_0);
     
+    
     if (integrator.getApplyThermostat()) {
         for (int particle = 0; particle < numParticles; particle++) {
+
             if (system.getParticleMass(particle) == 0.0)
                 continue;
             const double c3_0 = c2_0*sqrt(nkT/system.getParticleMass(particle));
@@ -167,27 +194,35 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
             }
         }
     }
+    
 
     // Update velocities.
-    
+
     for (int i = 0; i < numCopies; i++)
         for (int j = 0; j < numParticles; j++)
             if (system.getParticleMass(j) != 0.0)
                 velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
     
+    
     // Evolve the free ring polymer by transforming to the frequency domain.
-
     for (int particle = 0; particle < numParticles; particle++) {
         if (system.getParticleMass(particle) == 0.0)
             continue;
+        
+        vector<complex<double>> v(numCopies);
+        vector<complex<double>> q(numCopies);
+        
         for (int component = 0; component < 3; component++) {
+
             for (int k = 0; k < numCopies; k++) {
                 q[k] = complex<double>(scale*positions[k][particle][component], 0.0);
                 v[k] = complex<double>(scale*velocities[k][particle][component], 0.0);
             }
+
             pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, q.data(), q.data(), 1.0, 1);
             pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, true, v.data(), v.data(), 1.0, 1);
             q[0] += v[0]*dt;
+            
             for (int k = 1; k < numCopies; k++) {
                 const double wk = twown*sin(k*M_PI/numCopies);
                 const double wt = wk*dt;
@@ -197,8 +232,10 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
                 q[k] = v[k]*(sinwt/wk) + q[k]*coswt; // Advance position from t to t+dt
                 v[k] = vprime;
             }
+
             pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, q.data(), q.data(), 1.0, 1);
             pocketfft::c2c({(size_t) numCopies}, {sizeof(complex<double>)}, {sizeof(complex<double>)}, {0}, false, v.data(), v.data(), 1.0, 1);
+            
             for (int k = 0; k < numCopies; k++) {
                 positions[k][particle][component] = scale*q[k].real();
                 velocities[k][particle][component] = scale*v[k].real();
@@ -209,14 +246,14 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
     // Calculate forces based on the updated positions.
     
     computeForcesClosedPath(context, integrator);
-
+    
     // Update velocities.
     
     for (int i = 0; i < numCopies; i++)
         for (int j = 0; j < numParticles; j++)
-            if (system.getParticleMass(j) != 0.0)
+            if (system.getParticleMass(j) != 0.0) 
                 velocities[i][j] += forces[i][j]*(halfdt/system.getParticleMass(j));
-
+    
     // Apply the PILE-L thermostat again.
     
     if (integrator.getApplyThermostat()) {
@@ -255,9 +292,8 @@ void ReferenceIntegrateRPMDStepKernel::executeClosedPath(ContextImpl& context, c
     }
     
     // Update the time.
-    
     context.setTime(context.getTime()+dt);
-    context.setStepCount(context.getStepCount() + 1);
+    context.setStepCount(context.getStepCount() + 1);        
 }
 
 void ReferenceIntegrateRPMDStepKernel::executeOpenPath(ContextImpl& context, const RPMDIntegrator& integrator, bool forcesAreValid) {
@@ -427,7 +463,6 @@ void ReferenceIntegrateRPMDStepKernel::computeForcesClosedPath(ContextImpl& cont
     vector<Vec3>& f = extractForces(context);
     
     // Compute forces from all groups that didn't have a specified contraction.
-    
     for (int i = 0; i < totalCopies; i++) {
         pos = positions[i];
         vel = velocities[i];
