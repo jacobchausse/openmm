@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2025 Stanford University and the Authors.           *
  * Authors: Peter Eastman                                                     *
@@ -92,7 +90,7 @@ void CommonIntegrateQTBStepKernel::initialize(const System& system, const QTBInt
     replacements["FFT_FORWARD"] = createFFT(3*segmentLength, 0, outputIndex, true);
     replacements["RECIP_DATA"] = (outputIndex == 0 ? "data0" : "data1");
     replacements["FFT_BACKWARD"] = createFFT(3*segmentLength, outputIndex, outputIndex, false);
-    replacements["ADAPTATION_FFT"] = createFFT(segmentLength, 0, outputIndex, true);
+    replacements["ADAPTATION_FFT"] = createFFT(3*segmentLength, 0, outputIndex, true);
     replacements["ADAPTATION_RECIP"] = (outputIndex == 0 ? "data0" : "data1");
     ComputeProgram program = cc.compileProgram(cc.replaceStrings(CommonKernelSources::qtb, replacements), defines);
     kernel1 = program->createKernel("integrateQTBPart1");
@@ -121,10 +119,8 @@ void CommonIntegrateQTBStepKernel::execute(ContextImpl& context, const QTBIntegr
             kernel1->addArg(dt);
         else
             kernel1->addArg((float) dt);
-        kernel1->addArg();
         kernel1->addArg(cc.getVelm());
         kernel1->addArg(cc.getLongForceBuffer());
-        kernel1->addArg(segmentVelocity);
         kernel1->addArg(cc.getAtomIndexArray());
         kernel2->addArg(numAtoms);
         if (useDouble) {
@@ -140,6 +136,7 @@ void CommonIntegrateQTBStepKernel::execute(ContextImpl& context, const QTBIntegr
         kernel2->addArg(integration.getPosDelta());
         kernel2->addArg(oldDelta);
         kernel2->addArg(randomForce);
+        kernel2->addArg(segmentVelocity);
         kernel2->addArg(cc.getAtomIndexArray());
         kernel3->addArg(numAtoms);
         if (useDouble)
@@ -217,7 +214,6 @@ void CommonIntegrateQTBStepKernel::execute(ContextImpl& context, const QTBIntegr
 
     // Perform the integration.
 
-    kernel1->setArg(3, stepIndex);
     kernel2->setArg(3, stepIndex);
     kernel1->execute(numAtoms);
     integration.applyVelocityConstraints(integrator.getConstraintTolerance());

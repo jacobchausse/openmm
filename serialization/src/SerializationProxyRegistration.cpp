@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2010-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -35,6 +33,7 @@
 #include "openmm/CMAPTorsionForce.h"
 #include "openmm/CMMotionRemover.h"
 #include "openmm/CompoundIntegrator.h"
+#include "openmm/ConstantPotentialForce.h"
 #include "openmm/CustomAngleForce.h"
 #include "openmm/CustomBondForce.h"
 #include "openmm/CustomCentroidBondForce.h"
@@ -61,6 +60,7 @@
 #include "openmm/MonteCarloMembraneBarostat.h"
 #include "openmm/NonbondedForce.h"
 #include "openmm/NoseHooverIntegrator.h"
+#include "openmm/OrientationRestraintForce.h"
 #include "openmm/PeriodicTorsionForce.h"
 #include "openmm/QTBIntegrator.h"
 #include "openmm/RBTorsionForce.h"
@@ -79,6 +79,7 @@
 #include "openmm/serialization/CMAPTorsionForceProxy.h"
 #include "openmm/serialization/CMMotionRemoverProxy.h"
 #include "openmm/serialization/CompoundIntegratorProxy.h"
+#include "openmm/serialization/ConstantPotentialForceProxy.h"
 #include "openmm/serialization/CustomAngleForceProxy.h"
 #include "openmm/serialization/CustomBondForceProxy.h"
 #include "openmm/serialization/CustomCentroidBondForceProxy.h"
@@ -105,6 +106,7 @@
 #include "openmm/serialization/MonteCarloMembraneBarostatProxy.h"
 #include "openmm/serialization/NonbondedForceProxy.h"
 #include "openmm/serialization/NoseHooverIntegratorProxy.h"
+#include "openmm/serialization/OrientationRestraintForceProxy.h"
 #include "openmm/serialization/PeriodicTorsionForceProxy.h"
 #include "openmm/serialization/QTBIntegratorProxy.h"
 #include "openmm/serialization/RBTorsionForceProxy.h"
@@ -138,6 +140,7 @@ extern "C" void registerSerializationProxies() {
     SerializationProxy::registerProxy(typeid(CMAPTorsionForce), new CMAPTorsionForceProxy());
     SerializationProxy::registerProxy(typeid(CMMotionRemover), new CMMotionRemoverProxy());
     SerializationProxy::registerProxy(typeid(CompoundIntegrator), new CompoundIntegratorProxy());
+    SerializationProxy::registerProxy(typeid(ConstantPotentialForce), new ConstantPotentialForceProxy());
     SerializationProxy::registerProxy(typeid(Continuous1DFunction), new Continuous1DFunctionProxy());
     SerializationProxy::registerProxy(typeid(Continuous2DFunction), new Continuous2DFunctionProxy());
     SerializationProxy::registerProxy(typeid(Continuous3DFunction), new Continuous3DFunctionProxy());
@@ -170,6 +173,7 @@ extern "C" void registerSerializationProxies() {
     SerializationProxy::registerProxy(typeid(MonteCarloMembraneBarostat), new MonteCarloMembraneBarostatProxy());
     SerializationProxy::registerProxy(typeid(NonbondedForce), new NonbondedForceProxy());
     SerializationProxy::registerProxy(typeid(NoseHooverIntegrator), new NoseHooverIntegratorProxy());
+    SerializationProxy::registerProxy(typeid(OrientationRestraintForce), new OrientationRestraintForceProxy());
     SerializationProxy::registerProxy(typeid(PeriodicTorsionForce), new PeriodicTorsionForceProxy());
     SerializationProxy::registerProxy(typeid(QTBIntegrator), new QTBIntegratorProxy());
     SerializationProxy::registerProxy(typeid(RBTorsionForce), new RBTorsionForceProxy());

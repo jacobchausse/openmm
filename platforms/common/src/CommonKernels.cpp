@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -3419,6 +3417,27 @@ private:
     set<int> particles;
 };
 
+class CommonCalcRMSDForceKernel::ReorderListener : public ComputeContext::ReorderListener {
+public:
+    ReorderListener(ComputeContext& cc, const vector<int>& particleIndices, const vector<Vec3>& centeredPositions, ArrayInterface& referencePos) : cc(cc),
+            particleIndices(particleIndices), centeredPositions(centeredPositions), referencePos(referencePos) {
+    }
+    void execute() {
+        const vector<int>& order = cc.getAtomIndex();
+        vector<mm_double4> pos(centeredPositions.size());
+        for (int i = 0; i < particleIndices.size(); i++) {
+            Vec3 p = centeredPositions[order[particleIndices[i]]];
+            pos[particleIndices[i]] = mm_double4(p[0], p[1], p[2], 0);
+        }
+        referencePos.upload(pos, true);
+    }
+private:
+    ComputeContext& cc;
+    const vector<int>& particleIndices;
+    const vector<Vec3>& centeredPositions;
+    ArrayInterface& referencePos;
+};
+
 void CommonCalcRMSDForceKernel::initialize(const System& system, const RMSDForce& force) {
     // Create data structures.
     
@@ -3431,6 +3450,8 @@ void CommonCalcRMSDForceKernel::initialize(const System& system, const RMSDForce
     referencePos.initialize(cc, system.getNumParticles(), 4*elementSize, "referencePos");
     particles.initialize<int>(cc, numParticles, "particles");
     buffer.initialize(cc, 13, elementSize, "buffer");
+    listener = new ReorderListener(cc, particleVec, centeredPositions, referencePos);
+    cc.addReorderListener(listener);
     recordParameters(force);
     info = new ForceInfo(force);
     cc.addForce(info);
@@ -3460,25 +3481,19 @@ void CommonCalcRMSDForceKernel::initialize(const System& system, const RMSDForce
 void CommonCalcRMSDForceKernel::recordParameters(const RMSDForce& force) {
     // Record the parameters and center the reference positions.
     
-    vector<int> particleVec = force.getParticles();
+    particleVec = force.getParticles();
     if (particleVec.size() == 0)
         for (int i = 0; i < cc.getNumAtoms(); i++)
             particleVec.push_back(i);
-    vector<Vec3> centeredPositions = force.getReferencePositions();
+    centeredPositions = force.getReferencePositions();
     Vec3 center;
     for (int i : particleVec)
         center += centeredPositions[i];
     center /= particleVec.size();
     for (Vec3& p : centeredPositions)
         p -= center;
-
-    // Upload them to the device.
-
     particles.upload(particleVec);
-    vector<mm_double4> pos;
-    for (Vec3 p : centeredPositions)
-        pos.push_back(mm_double4(p[0], p[1], p[2], 0));
-    referencePos.upload(pos, true);
+    listener->execute();
 
     // Record the sum of the norms of the reference positions.
 
@@ -3674,6 +3689,215 @@ double CommonCalcRGForceKernel::execute(ContextImpl& context, bool includeForces
     rgKernel->execute(particles.getSize(), blockSize);
     forceKernel->execute(particles.getSize(), blockSize);
     return 0.0;
+}
+
+class CommonCalcOrientationRestraintForceKernel::ForceInfo : public ComputeForceInfo {
+public:
+    ForceInfo(const OrientationRestraintForce& force) : force(force) {
+        updateParticles();
+    }
+    void updateParticles() {
+        particles.clear();
+        for (int i : force.getParticles())
+            particles.insert(i);
+    }
+    bool areParticlesIdentical(int particle1, int particle2) {
+        bool include1 = (particles.find(particle1) != particles.end());
+        bool include2 = (particles.find(particle2) != particles.end());
+        return (include1 == include2);
+    }
+private:
+    const OrientationRestraintForce& force;
+    set<int> particles;
+};
+
+class CommonCalcOrientationRestraintForceKernel::ReorderListener : public ComputeContext::ReorderListener {
+public:
+    ReorderListener(ComputeContext& cc, const vector<int>& particleIndices, const vector<Vec3>& centeredPositions, ArrayInterface& referencePos) : cc(cc),
+            particleIndices(particleIndices), centeredPositions(centeredPositions), referencePos(referencePos) {
+    }
+    void execute() {
+        const vector<int>& order = cc.getAtomIndex();
+        vector<mm_double4> pos(centeredPositions.size());
+        for (int i = 0; i < particleIndices.size(); i++) {
+            Vec3 p = centeredPositions[order[particleIndices[i]]];
+            pos[particleIndices[i]] = mm_double4(p[0], p[1], p[2], 0);
+        }
+        referencePos.upload(pos, true);
+    }
+private:
+    ComputeContext& cc;
+    const vector<int>& particleIndices;
+    const vector<Vec3>& centeredPositions;
+    ArrayInterface& referencePos;
+};
+
+void CommonCalcOrientationRestraintForceKernel::initialize(const System& system, const OrientationRestraintForce& force) {
+    // Create data structures.
+
+    ContextSelector selector(cc);
+    bool useDouble = cc.getUseDoublePrecision();
+    int elementSize = (useDouble ? sizeof(double) : sizeof(float));
+    int numParticles = force.getParticles().size();
+    if (numParticles == 0)
+        numParticles = system.getNumParticles();
+    referencePos.initialize(cc, system.getNumParticles(), 4*elementSize, "referencePos");
+    particles.initialize<int>(cc, numParticles, "particles");
+    buffer.initialize(cc, 9, elementSize, "buffer");
+    eigenvectors.initialize(cc, 4, 4*elementSize, "eigenvectors");
+    listener = new ReorderListener(cc, particleVec, centeredPositions, referencePos);
+    cc.addReorderListener(listener);
+    recordParameters(force);
+    info = new ForceInfo(force);
+    cc.addForce(info);
+
+    // Create the kernels.
+
+    blockSize = min(256, cc.getMaxThreadBlockSize());
+    map<string, string> defines;
+    defines["THREAD_BLOCK_SIZE"] = cc.intToString(blockSize);
+    ComputeProgram program = cc.compileProgram(CommonKernelSources::orientationRestraintForce, defines);
+    kernel1 = program->createKernel("computeCorrelationMatrix");
+    kernel2 = program->createKernel("computeOrientationForces");
+    kernel1->addArg();
+    kernel1->addArg(cc.getPosq());
+    kernel1->addArg(referencePos);
+    kernel1->addArg(particles);
+    kernel1->addArg(buffer);
+    kernel2->addArg();
+    kernel2->addArg(cc.getPaddedNumAtoms());
+    kernel2->addArg(referencePos);
+    kernel2->addArg(particles);
+    kernel2->addArg();
+    kernel2->addArg();
+    kernel2->addArg(eigenvectors);
+    kernel2->addArg(cc.getLongForceBuffer());
+}
+
+void CommonCalcOrientationRestraintForceKernel::recordParameters(const OrientationRestraintForce& force) {
+    // Record the parameters and center the reference positions.
+
+    k = force.getK();
+    particleVec = force.getParticles();
+    if (particleVec.size() == 0)
+        for (int i = 0; i < cc.getNumAtoms(); i++)
+            particleVec.push_back(i);
+    centeredPositions = force.getReferencePositions();
+    Vec3 center;
+    for (int i : particleVec)
+        center += centeredPositions[i];
+    center /= particleVec.size();
+    for (Vec3& p : centeredPositions)
+        p -= center;
+    particles.upload(particleVec);
+    listener->execute();
+}
+
+double CommonCalcOrientationRestraintForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
+    ContextSelector selector(cc);
+    if (cc.getUseDoublePrecision())
+        return executeImpl<double>(context, includeForces);
+    return executeImpl<float>(context, includeForces);
+}
+
+template <class REAL>
+double CommonCalcOrientationRestraintForceKernel::executeImpl(ContextImpl& context, bool includeForces) {
+    // Execute the first kernel.
+
+    int numParticles = particles.getSize();
+    kernel1->setArg(0, numParticles);
+    kernel1->execute(blockSize, blockSize);
+
+    // Download the results, build the F matrix, and find the maximum eigenvalue
+    // and eigenvector.
+
+    vector<REAL> b;
+    buffer.download(b);
+
+    // JAMA::Eigenvalue may run into an infinite loop if we have any NaN
+    for (int i = 0; i < 9; i++) {
+        if (b[i] != b[i])
+            throw OpenMMException("NaN encountered during orientation restraint force calculation");
+    }
+
+    Array2D<double> F(4, 4);
+    F[0][0] =  b[0*3+0] + b[1*3+1] + b[2*3+2];
+    F[1][0] =  b[1*3+2] - b[2*3+1];
+    F[2][0] =  b[2*3+0] - b[0*3+2];
+    F[3][0] =  b[0*3+1] - b[1*3+0];
+    F[0][1] =  b[1*3+2] - b[2*3+1];
+    F[1][1] =  b[0*3+0] - b[1*3+1] - b[2*3+2];
+    F[2][1] =  b[0*3+1] + b[1*3+0];
+    F[3][1] =  b[0*3+2] + b[2*3+0];
+    F[0][2] =  b[2*3+0] - b[0*3+2];
+    F[1][2] =  b[0*3+1] + b[1*3+0];
+    F[2][2] = -b[0*3+0] + b[1*3+1] - b[2*3+2];
+    F[3][2] =  b[1*3+2] + b[2*3+1];
+    F[0][3] =  b[0*3+1] - b[1*3+0];
+    F[1][3] =  b[0*3+2] + b[2*3+0];
+    F[2][3] =  b[1*3+2] + b[2*3+1];
+    F[3][3] = -b[0*3+0] - b[1*3+1] + b[2*3+2];
+    JAMA::Eigenvalue<double> eigen(F);
+    Array1D<double> values;
+    eigen.getRealEigenvalues(values);
+    Array2D<double> vectors;
+    eigen.getV(vectors);
+
+    // Construct the quaternion and use it to compute the energy.
+
+    double q[] = {vectors[0][3], vectors[1][3], vectors[2][3], vectors[3][3]};
+    double energy = 2*k*(1.0-q[0]*q[0]);
+
+    // Invoke the kernel to apply forces.
+
+    if (q[0]*q[0] < 1.0 && includeForces) {
+        double theta = 2*asin(sqrt(1.0-q[0]*q[0]));
+        double dxdq = 4.0*k*sin(theta/2)*cos(theta/2)/sqrt(1.0-q[0]*q[0]);
+        if (vectors[0][3] > 0)
+            dxdq = -dxdq;
+        kernel2->setArg(0, numParticles);
+        if (cc.getUseDoublePrecision()) {
+            kernel2->setArg(4, dxdq);
+            kernel2->setArg(5, mm_double4(values[0], values[1], values[2], values[3]));
+            vector<mm_double4> v = {
+                mm_double4(vectors[0][0], vectors[0][1], vectors[0][2], vectors[0][3]),
+                mm_double4(vectors[1][0], vectors[1][1], vectors[1][2], vectors[1][3]),
+                mm_double4(vectors[2][0], vectors[2][1], vectors[2][2], vectors[2][3]),
+                mm_double4(vectors[3][0], vectors[3][1], vectors[3][2], vectors[3][3])
+            };
+            eigenvectors.upload(v);
+        }
+        else {
+            kernel2->setArg(4, (float) dxdq);
+            kernel2->setArg(5, mm_float4(values[0], values[1], values[2], values[3]));
+            vector<mm_float4> v = {
+                mm_float4(vectors[0][0], vectors[0][1], vectors[0][2], vectors[0][3]),
+                mm_float4(vectors[1][0], vectors[1][1], vectors[1][2], vectors[1][3]),
+                mm_float4(vectors[2][0], vectors[2][1], vectors[2][2], vectors[2][3]),
+                mm_float4(vectors[3][0], vectors[3][1], vectors[3][2], vectors[3][3])
+            };
+            eigenvectors.upload(v);
+        }
+        kernel2->execute(numParticles);
+    }
+    return energy;
+}
+
+void CommonCalcOrientationRestraintForceKernel::copyParametersToContext(ContextImpl& context, const OrientationRestraintForce& force) {
+    ContextSelector selector(cc);
+    if (referencePos.getSize() != force.getReferencePositions().size())
+        throw OpenMMException("updateParametersInContext: The number of reference positions has changed");
+    int numParticles = force.getParticles().size();
+    if (numParticles == 0)
+        numParticles = context.getSystem().getNumParticles();
+    if (numParticles != particles.getSize())
+        particles.resize(numParticles);
+    recordParameters(force);
+
+    // Mark that the current reordering may be invalid.
+
+    info->updateParticles();
+    cc.invalidateMolecules(info);
 }
 
 void CommonApplyAndersenThermostatKernel::initialize(const System& system, const AndersenThermostat& thermostat) {
@@ -3915,10 +4139,8 @@ void CommonCalcATMForceKernel::initialize(const System& system, const ATMForce& 
             displVector0[p] = mm_double4(d0[p][0], d0[p][1], d0[p][2], 0);
             displParticlesVector[p] = mm_int4(j1[p], i1[p], j0[p], i0[p]);
         }
-        displ1.initialize<mm_double4>(cc, cc.getPaddedNumAtoms(), "displ1");
         displacement1.initialize<mm_double4>(cc, cc.getPaddedNumAtoms(), "displacement1");
         displacement1.upload(displVector1);
-        displ0.initialize<mm_double4>(cc, cc.getPaddedNumAtoms(), "displ0");
         displacement0.initialize<mm_double4>(cc, cc.getPaddedNumAtoms(), "displacement0");
         displacement0.upload(displVector0);
     }
@@ -3930,10 +4152,8 @@ void CommonCalcATMForceKernel::initialize(const System& system, const ATMForce& 
             displVector0[p] = mm_float4(d0[p][0], d0[p][1], d0[p][2], 0);
             displParticlesVector[p] = mm_int4(j1[p], i1[p], j0[p], i0[p]);
         }
-        displ1.initialize<mm_float4>(cc, cc.getPaddedNumAtoms(), "displ1");
         displacement1.initialize<mm_float4>(cc, cc.getPaddedNumAtoms(), "displacement1");
         displacement1.upload(displVector1);
-        displ0.initialize<mm_float4>(cc, cc.getPaddedNumAtoms(), "displ0");
         displacement0.initialize<mm_float4>(cc, cc.getPaddedNumAtoms(), "displacement0");
         displacement0.upload(displVector0);
     }
@@ -3977,27 +4197,17 @@ void CommonCalcATMForceKernel::initKernels(ContextImpl& context, ContextImpl& in
 
         ComputeProgram program = cc.compileProgram(CommonKernelSources::atmforce);
 
-        //create the setDisplacements kernel
-        setDisplacementsKernel = program->createKernel("setDisplacements");
-        setDisplacementsKernel->addArg(numParticles);
-        setDisplacementsKernel->addArg(cc.getPosq());
-        setDisplacementsKernel->addArg(displacement0);
-        setDisplacementsKernel->addArg(displacement1);
-        setDisplacementsKernel->addArg(displParticles);
-        setDisplacementsKernel->addArg(cc.getAtomIndexArray());
-        setDisplacementsKernel->addArg(invAtomOrder);
-        setDisplacementsKernel->addArg(displ0);
-        setDisplacementsKernel->addArg(displ1);
-
         //create CopyState kernel
         copyStateKernel = program->createKernel("copyState");
         copyStateKernel->addArg(numParticles);
         copyStateKernel->addArg(cc.getPosq());
         copyStateKernel->addArg(cc0.getPosq());
         copyStateKernel->addArg(cc1.getPosq());
-        copyStateKernel->addArg(displ0);
-        copyStateKernel->addArg(displ1);
+        copyStateKernel->addArg(displacement0);
+        copyStateKernel->addArg(displacement1);
+        copyStateKernel->addArg(displParticles);
         copyStateKernel->addArg(cc.getAtomIndexArray());
+        copyStateKernel->addArg(invAtomOrder);
         copyStateKernel->addArg(inner0InvAtomOrder);
         copyStateKernel->addArg(inner1InvAtomOrder);
         if (cc.getUseMixedPrecision()) {
@@ -4087,7 +4297,6 @@ void CommonCalcATMForceKernel::copyState(ContextImpl& context,
     cc0.reorderAtoms();
     cc1.reorderAtoms();
 
-    setDisplacementsKernel->execute(numParticles);
     copyStateKernel->execute(numParticles);
 
     map<string, double> innerParameters0 = innerContext0.getParameters();

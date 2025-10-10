@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Portions copyright (c) 2020-2022 Advanced Micro Devices, Inc.              *
@@ -56,6 +54,11 @@ using namespace std;
         throw OpenMMException(m.str());\
     }
 
+static void getHipPmeParameters(HipContext& cu, bool& usePmeQueue, bool& useFixedPointChargeSpreading) {
+    usePmeQueue = (!cu.getPlatformData().disablePmeStream && !cu.getPlatformData().useCpuPme);
+    useFixedPointChargeSpreading = cu.getUseDoublePrecision() || !cu.getSupportsHardwareFloatGlobalAtomicAdd() || cu.getPlatformData().deterministicForces;
+}
+
 void HipCalcForcesAndEnergyKernel::initialize(const System& system) {
 }
 
@@ -90,7 +93,13 @@ double HipCalcForcesAndEnergyKernel::finishComputation(ContextImpl& context, boo
 }
 
 void HipCalcNonbondedForceKernel::initialize(const System& system, const NonbondedForce& force) {
-    bool usePmeQueue = (!cu.getPlatformData().disablePmeStream && !cu.getPlatformData().useCpuPme);
-    bool useFixedPointChargeSpreading = cu.getUseDoublePrecision() || !cu.getSupportsHardwareFloatGlobalAtomicAdd() || cu.getPlatformData().deterministicForces;
+    bool usePmeQueue, useFixedPointChargeSpreading;
+    getHipPmeParameters(cu, usePmeQueue, useFixedPointChargeSpreading);
     commonInitialize(system, force, usePmeQueue, false, useFixedPointChargeSpreading, cu.getPlatformData().useCpuPme);
+}
+
+void HipCalcConstantPotentialForceKernel::initialize(const System& system, const ConstantPotentialForce& force) {
+    bool usePmeQueue, useFixedPointChargeSpreading;
+    getHipPmeParameters(cu, usePmeQueue, useFixedPointChargeSpreading);
+    commonInitialize(system, force, false, useFixedPointChargeSpreading);
 }

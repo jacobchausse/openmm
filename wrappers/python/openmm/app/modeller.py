@@ -1,10 +1,8 @@
 """
 modeller.py: Provides tools for editing molecular models
 
-This is part of the OpenMM molecular simulation toolkit originating from
-Simbios, the NIH National Center for Physics-Based Simulation of
-Biological Structures at Stanford, funded under the NIH Roadmap for
-Medical Research, grant U54 GM072970. See https://simtk.org.
+This is part of the OpenMM molecular simulation toolkit.
+See https://openmm.org/development.
 
 Portions copyright (c) 2012-2025 Stanford University and the Authors.
 Authors: Peter Eastman
@@ -38,7 +36,7 @@ from openmm.app import Topology, PDBFile, ForceField
 from openmm.app.forcefield import AllBonds, CutoffNonPeriodic, CutoffPeriodic, DrudeGenerator, _getDataDirectories
 from openmm.app.internal import compiled
 from openmm.vec3 import Vec3
-from openmm import System, Context, NonbondedForce, CustomNonbondedForce, HarmonicBondForce, HarmonicAngleForce, VerletIntegrator, LangevinIntegrator, LocalEnergyMinimizer
+from openmm import System, Context, NonbondedForce, AmoebaVdwForce, AmoebaMultipoleForce, CustomNonbondedForce, HarmonicBondForce, HarmonicAngleForce, VerletIntegrator, LangevinIntegrator, LocalEnergyMinimizer
 from openmm.unit import nanometer, molar, elementary_charge, degree, acos, is_quantity, dot, norm, kilojoules_per_mole
 import openmm.unit as unit
 from . import element as elem
@@ -310,16 +308,20 @@ class Modeller(object):
         # Determine the total charge of the system
         system = forcefield.createSystem(self.topology, residueTemplates=residueTemplates)
         for i in range(system.getNumForces()):
-            if isinstance(system.getForce(i), NonbondedForce):
+            if isinstance(system.getForce(i), (NonbondedForce, AmoebaMultipoleForce)):
                 nonbonded = system.getForce(i)
                 break
         else:
             raise ValueError('The ForceField does not specify a NonbondedForce')
 
         totalCharge = 0.0
-        for i in range(nonbonded.getNumParticles()):
-            nb_i = nonbonded.getParticleParameters(i)
-            totalCharge += nb_i[0].value_in_unit(elementary_charge)
+        if isinstance(nonbonded, AmoebaMultipoleForce):
+            for i in range(nonbonded.getNumMultipoles()):
+                totalCharge += nonbonded.getMultipoleParameters(i)[0].value_in_unit(elementary_charge)
+        else:
+            for i in range(nonbonded.getNumParticles()):
+                totalCharge += nonbonded.getParticleParameters(i)[0].value_in_unit(elementary_charge)
+
         # Round to nearest integer
         totalCharge = int(floor(0.5 + totalCharge))
 
@@ -519,15 +521,18 @@ class Modeller(object):
         system = forcefield.createSystem(self.topology, residueTemplates=residueTemplates)
         nonbonded = None
         for i in range(system.getNumForces()):
-            if isinstance(system.getForce(i), NonbondedForce):
+            if isinstance(system.getForce(i), (NonbondedForce, AmoebaVdwForce)):
                 nonbonded = system.getForce(i)
+      
         if nonbonded is None:
             raise ValueError('The ForceField does not specify a NonbondedForce')
         cutoff = [waterRadius]*system.getNumParticles()
+
         for i in range(system.getNumParticles()):
             params = nonbonded.getParticleParameters(i)
             if params[2] != 0*kilojoules_per_mole:
                 cutoff[i] += params[1].value_in_unit(nanometer)*vdwRadiusPerSigma
+
         waterCutoff = waterRadius
         if len(cutoff) == 0:
             maxCutoff = waterCutoff

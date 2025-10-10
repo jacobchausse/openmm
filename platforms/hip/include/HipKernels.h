@@ -4,10 +4,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Portions copyright (c) 2020-2022 Advanced Micro Devices, Inc.              *
@@ -35,6 +33,7 @@
 #include "openmm/System.h"
 #include "openmm/common/CommonKernels.h"
 #include "openmm/common/CommonCalcNonbondedForce.h"
+#include "openmm/common/CommonCalcConstantPotentialForce.h"
 #include "openmm/common/ComputeSort.h"
 #include "openmm/common/FFT3D.h"
 
@@ -99,6 +98,25 @@ public:
      * @param force      the NonbondedForce this kernel will be used for
      */
     void initialize(const System& system, const NonbondedForce& force);
+private:
+    HipContext& cu;
+};
+
+/**
+ * This kernel is invoked by ConstantPotentialForce to calculate the forces acting on the system.
+ */
+class HipCalcConstantPotentialForceKernel : public CommonCalcConstantPotentialForceKernel {
+public:
+    HipCalcConstantPotentialForceKernel(std::string name, const Platform& platform, HipContext& cu, const System& system) :
+            CommonCalcConstantPotentialForceKernel(name, platform, cu, system), cu(cu) {
+    }
+    /**
+     * Initialize the kernel.
+     *
+     * @param system     the System this kernel will be applied to
+     * @param force      the ConstantPotentialForce this kernel will be used for
+     */
+    void initialize(const System& system, const ConstantPotentialForce& force);
 private:
     HipContext& cu;
 };

@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -49,6 +47,13 @@
 using namespace OpenMM;
 using namespace std;
 
+static void getOpenCLPmeParameters(OpenCLContext& cl, bool& usePmeQueue, bool& deviceIsCpu) {
+    string vendor = cl.getDevice().getInfo<CL_DEVICE_VENDOR>();
+    bool isNvidia = (vendor.size() >= 6 && vendor.substr(0, 6) == "NVIDIA");
+    usePmeQueue = (!cl.getPlatformData().disablePmeStream && !cl.getPlatformData().useCpuPme && isNvidia);
+    deviceIsCpu = (cl.getDevice().getInfo<CL_DEVICE_TYPE>() == CL_DEVICE_TYPE_CPU);
+}
+
 void OpenCLCalcForcesAndEnergyKernel::initialize(const System& system) {
 }
 
@@ -82,9 +87,13 @@ double OpenCLCalcForcesAndEnergyKernel::finishComputation(ContextImpl& context, 
 }
 
 void OpenCLCalcNonbondedForceKernel::initialize(const System& system, const NonbondedForce& force) {
-    string vendor = cl.getDevice().getInfo<CL_DEVICE_VENDOR>();
-    bool isNvidia = (vendor.size() >= 6 && vendor.substr(0, 6) == "NVIDIA");
-    bool usePmeQueue = (!cl.getPlatformData().disablePmeStream && !cl.getPlatformData().useCpuPme && isNvidia);
-    bool deviceIsCpu = (cl.getDevice().getInfo<CL_DEVICE_TYPE>() == CL_DEVICE_TYPE_CPU);
+    bool usePmeQueue, deviceIsCpu;
+    getOpenCLPmeParameters(cl, usePmeQueue, deviceIsCpu);
     commonInitialize(system, force, usePmeQueue, deviceIsCpu, true, cl.getPlatformData().useCpuPme);
+}
+
+void OpenCLCalcConstantPotentialForceKernel::initialize(const System& system, const ConstantPotentialForce& force) {
+    bool usePmeQueue, deviceIsCpu;
+    getOpenCLPmeParameters(cl, usePmeQueue, deviceIsCpu);
+    commonInitialize(system, force, deviceIsCpu, true);
 }

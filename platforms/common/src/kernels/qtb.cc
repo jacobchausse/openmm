@@ -1,15 +1,12 @@
 /**
  * Perform the first part of integration: velocity step.
  */
-KERNEL void integrateQTBPart1(int numAtoms, int paddedNumAtoms, mixed dt, int stepIndex, GLOBAL mixed4* RESTRICT velm,
-        GLOBAL const mm_long* RESTRICT force, GLOBAL mixed* RESTRICT segmentVelocity, GLOBAL const int* RESTRICT atomOrder) {
+KERNEL void integrateQTBPart1(int numAtoms, int paddedNumAtoms, mixed dt, GLOBAL mixed4* RESTRICT velm,
+        GLOBAL const mm_long* RESTRICT force, GLOBAL const int* RESTRICT atomOrder) {
     mixed fscale = dt/(mixed) 0x100000000;
     for (int atom = GLOBAL_ID; atom < numAtoms; atom += GLOBAL_SIZE) {
         int atomIndex = atomOrder[atom];
         mixed4 velocity = velm[atom];
-        segmentVelocity[3*numAtoms*stepIndex + atomIndex] = velocity.x;
-        segmentVelocity[3*numAtoms*stepIndex + numAtoms + atomIndex] = velocity.y;
-        segmentVelocity[3*numAtoms*stepIndex + 2*numAtoms + atomIndex] = velocity.z;
         if (velocity.w != 0.0) {
             velocity.x += fscale*velocity.w*force[atom];
             velocity.y += fscale*velocity.w*force[atom+paddedNumAtoms];
@@ -25,18 +22,25 @@ KERNEL void integrateQTBPart1(int numAtoms, int paddedNumAtoms, mixed dt, int st
  */
 KERNEL void integrateQTBPart2(int numAtoms, mixed dt, mixed friction, int stepIndex, GLOBAL mixed4* RESTRICT velm,
         GLOBAL mixed4* RESTRICT posDelta, GLOBAL mixed4* RESTRICT oldDelta, GLOBAL const mixed* RESTRICT randomForce,
-        GLOBAL const int* RESTRICT atomOrder) {
+        GLOBAL mixed* RESTRICT segmentVelocity, GLOBAL const int* RESTRICT atomOrder) {
     mixed halfdt = 0.5f*dt;
     mixed vscale = EXP(-dt*friction);
+    mixed halfvscale = EXP(-halfdt*friction);
     for (int atom = GLOBAL_ID; atom < numAtoms; atom += GLOBAL_SIZE) {
         int atomIndex = atomOrder[atom];
         mixed4 velocity = velm[atom];
         if (velocity.w != 0.0) {
             mixed4 delta = make_mixed4(halfdt*velocity.x, halfdt*velocity.y, halfdt*velocity.z, 0);
             mixed fscale = dt*velocity.w;
-            velocity.x = vscale*velocity.x + fscale*randomForce[3*numAtoms*stepIndex + atomIndex];
-            velocity.y = vscale*velocity.y + fscale*randomForce[3*numAtoms*stepIndex + numAtoms + atomIndex];
-            velocity.z = vscale*velocity.z + fscale*randomForce[3*numAtoms*stepIndex + 2*numAtoms + atomIndex];
+            mixed3 f = make_mixed3(randomForce[3*numAtoms*stepIndex + atomIndex],
+                                   randomForce[3*numAtoms*stepIndex + numAtoms + atomIndex],
+                                   randomForce[3*numAtoms*stepIndex + 2*numAtoms + atomIndex]);
+            segmentVelocity[3*numAtoms*stepIndex + atomIndex] = halfvscale*velocity.x + 0.5f*fscale*f.x;
+            segmentVelocity[3*numAtoms*stepIndex + numAtoms + atomIndex] = halfvscale*velocity.y + 0.5f*fscale*f.y;
+            segmentVelocity[3*numAtoms*stepIndex + 2*numAtoms + atomIndex] = halfvscale*velocity.z + 0.5f*fscale*f.z;
+            velocity.x = vscale*velocity.x + fscale*f.x;
+            velocity.y = vscale*velocity.y + fscale*f.y;
+            velocity.z = vscale*velocity.z + fscale*f.z;
             velm[atom] = velocity;
             delta += make_mixed4(halfdt*velocity.x, halfdt*velocity.y, halfdt*velocity.z, 0);
             posDelta[atom] = delta;
@@ -169,12 +173,13 @@ KERNEL void generateRandomForce(int numAtoms, int segmentLength, mixed dt, mixed
 KERNEL void adaptFrictionPart1(int numAtoms, int segmentLength, GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT particleType,
         GLOBAL const mixed* RESTRICT randomForce, GLOBAL const mixed* RESTRICT segmentVelocity, GLOBAL const mixed* RESTRICT adaptedFriction,
         GLOBAL mm_ulong* RESTRICT dfdt, GLOBAL mixed2* RESTRICT workspace) {
-    const int numFreq = (segmentLength+1)/2;
-    GLOBAL mixed2* data0 = &workspace[GROUP_ID*3*segmentLength];
-    GLOBAL mixed2* data1 = &data0[segmentLength];
-    GLOBAL mixed2* w = &data1[segmentLength];
-    for (int i = LOCAL_ID; i < segmentLength; i += LOCAL_SIZE)
-        w[i] = make_mixed2(cos(-i*2*M_PI/segmentLength), sin(-i*2*M_PI/segmentLength));
+    const int fftLength = 3*segmentLength;
+    const int numFreq = (fftLength+1)/2;
+    GLOBAL mixed2* data0 = &workspace[GROUP_ID*3*fftLength];
+    GLOBAL mixed2* data1 = &data0[fftLength];
+    GLOBAL mixed2* w = &data1[fftLength];
+    for (int i = LOCAL_ID; i < fftLength; i += LOCAL_SIZE)
+        w[i] = make_mixed2(cos(-i*2*M_PI/fftLength), sin(-i*2*M_PI/fftLength));
     for (int i = GROUP_ID; i < 3*numAtoms; i += NUM_GROUPS) {
         int atom = i/3;
         int axis = i%3;
@@ -184,11 +189,13 @@ KERNEL void adaptFrictionPart1(int numAtoms, int segmentLength, GLOBAL const mix
             // Pack the velocities and forces together so we can transform both at once.
             for (int j = LOCAL_ID; j < segmentLength; j += LOCAL_SIZE)
                 data0[j] = make_mixed2(segmentVelocity[numAtoms*(3*j+axis)+atom], randomForce[numAtoms*(3*j+axis)+atom]);
+            for (int j = segmentLength+LOCAL_ID; j < fftLength; j += LOCAL_SIZE)
+                data0[j] = make_mixed2(0);
             SYNC_THREADS
             ADAPTATION_FFT
             for (int j = LOCAL_ID; j < numFreq; j += LOCAL_SIZE) {
                 mixed2 d1 = ADAPTATION_RECIP[j];
-                mixed2 d2 = (j == 0 ? ADAPTATION_RECIP[0] : ADAPTATION_RECIP[segmentLength-j]);
+                mixed2 d2 = (j == 0 ? ADAPTATION_RECIP[0] : ADAPTATION_RECIP[fftLength-j]);
                 mixed2 v = 0.5f*make_mixed2(d1.x+d2.x, d1.y-d2.y);
                 mixed2 f = 0.5f*make_mixed2(d1.y+d2.y, -d1.x+d2.x);
                 mixed cvv = v.x*v.x + v.y*v.y;
@@ -196,6 +203,7 @@ KERNEL void adaptFrictionPart1(int numAtoms, int segmentLength, GLOBAL const mix
                 mixed dfdtinc = adaptedFriction[type*numFreq+j]*cvv/invMass - cvf.x;
                 ATOMIC_ADD(&dfdt[type*numFreq+j], (mm_ulong) realToFixedPoint(dfdtinc));
             }
+            SYNC_THREADS
         }
     }
 }

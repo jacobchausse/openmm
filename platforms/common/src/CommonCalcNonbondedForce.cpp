@@ -1,10 +1,8 @@
 /* -------------------------------------------------------------------------- *
  *                                   OpenMM                                   *
  * -------------------------------------------------------------------------- *
- * This is part of the OpenMM molecular simulation toolkit originating from   *
- * Simbios, the NIH National Center for Physics-Based Simulation of           *
- * Biological Structures at Stanford, funded under the NIH Roadmap for        *
- * Medical Research, grant U54 GM072970. See https://simtk.org.               *
+ * This is part of the OpenMM molecular simulation toolkit.                   *
+ * See https://openmm.org/development.                                        *
  *                                                                            *
  * Portions copyright (c) 2008-2025 Stanford University and the Authors.      *
  * Authors: Peter Eastman                                                     *
@@ -130,6 +128,8 @@ public:
         addForcesKernel->setArg(1, cc.getLongForceBuffer());
         addForcesKernel->execute(cc.getNumAtoms());
     }
+    void setChargeDerivatives(float* chargeDerivatives) {
+    }
 private:
     ComputeContext& cc;
     vector<mm_float4> posq;
@@ -144,7 +144,7 @@ public:
     void computeForceAndEnergy(bool includeForces, bool includeEnergy, int groups) {
         Vec3 boxVectors[3];
         cc.getPeriodicBoxVectors(boxVectors[0], boxVectors[1], boxVectors[2]);
-        pme.getAs<CalcPmeReciprocalForceKernel>().beginComputation(io, boxVectors, includeEnergy);
+        pme.getAs<CalcPmeReciprocalForceKernel>().beginComputation(io, boxVectors, includeEnergy, true, false);
     }
 private:
     ComputeContext& cc;
@@ -317,6 +317,7 @@ void CommonCalcNonbondedForceKernel::commonInitialize(const System& system, cons
     paramsDefines["ONE_4PI_EPS0"] = cc.doubleToString(ONE_4PI_EPS0);
     paramsDefines["EPSILON0"] = cc.doubleToString(EPSILON0);
     paramsDefines["WORK_GROUP_SIZE"] = cc.intToString(cc.ThreadBlockSize);
+    paramsDefines["CHARGE_BUFFER_SIZE"] = cc.intToString(cc.getNumThreadBlocks());
     hasOffsets = (force.getNumParticleParameterOffsets() > 0 || force.getNumExceptionParameterOffsets() > 0);
     if (hasOffsets)
         paramsDefines["HAS_OFFSETS"] = "1";
@@ -406,6 +407,7 @@ void CommonCalcNonbondedForceKernel::commonInitialize(const System& system, cons
             pmeDefines["PME_ORDER"] = cc.intToString(PmeOrder);
             pmeDefines["NUM_ATOMS"] = cc.intToString(numParticles);
             pmeDefines["PADDED_NUM_ATOMS"] = cc.intToString(cc.getPaddedNumAtoms());
+            pmeDefines["NUM_INDICES"] = "0";
             pmeDefines["RECIP_EXP_FACTOR"] = cc.doubleToString(M_PI*M_PI/(alpha*alpha));
             pmeDefines["GRID_SIZE_X"] = cc.intToString(gridSizeX);
             pmeDefines["GRID_SIZE_Y"] = cc.intToString(gridSizeY);
@@ -421,7 +423,7 @@ void CommonCalcNonbondedForceKernel::commonInitialize(const System& system, cons
 
                 try {
                     cpuPme = getPlatform().createKernel(CalcPmeReciprocalForceKernel::Name(), *cc.getContextImpl());
-                    cpuPme.getAs<CalcPmeReciprocalForceKernel>().initialize(gridSizeX, gridSizeY, gridSizeZ, numParticles, alpha, false);
+                    cpuPme.getAs<CalcPmeReciprocalForceKernel>().initialize(gridSizeX, gridSizeY, gridSizeZ, numParticles, {}, alpha, false);
                     ComputeProgram program = cc.compileProgram(CommonKernelSources::pme, pmeDefines);
                     ComputeKernel addForcesKernel = program->createKernel("addForces");
                     pmeio = new PmeIO(cc, addForcesKernel);
